@@ -3,8 +3,9 @@ services:
     name: planner
     runtime: python
     plan: starter
+    region: frankfurt
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn "app:create_app()" --workers 2 --timeout 90
+    startCommand: gunicorn "app:create_app()" --preload --workers 2 --timeout 90
     healthCheckPath: /healthz
     envVars:
       - key: FLASK_ENV
@@ -23,5 +24,9 @@ services:
         sync: false   # Neon or Render Postgres connection string
       - key: OWNER_NAME
         sync: false
+      - key: OWNER_PROFILE
+        sync: false   # the "about me" text from data/profile.local.txt
+      - key: PLANNER_SEED_JSON
+        sync: false   # contents of data/seed.local.json, read once on first start
       - key: CLAUDE_MODEL
         value: claude-sonnet-4-5

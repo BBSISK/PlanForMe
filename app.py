@@ -4,6 +4,8 @@ import secrets
 from datetime import date, datetime, time, timedelta
 from functools import wraps
 
+from werkzeug.middleware.proxy_fix import ProxyFix
+
 from flask import (Flask, jsonify, redirect, render_template, request, send_from_directory,
                    session, url_for, abort)
 
@@ -15,10 +17,12 @@ import tools
 def create_app(test_config=None):
     app = Flask(__name__)
     db_url = os.environ.get("DATABASE_URL", "sqlite:///planner.db")
-    if db_url.startswith("postgres://"):
-        db_url = db_url.replace("postgres://", "postgresql://", 1)
+    for prefix in ("postgres://", "postgresql://"):  # use the psycopg 3 driver from requirements.txt
+        if db_url.startswith(prefix):
+            db_url = "postgresql+psycopg://" + db_url[len(prefix):]
     app.config.update(
         SQLALCHEMY_DATABASE_URI=db_url,
+        SQLALCHEMY_ENGINE_OPTIONS={"pool_pre_ping": True, "pool_recycle": 280},  # Neon suspends idle computes
         SECRET_KEY=os.environ.get("SECRET_KEY", "dev-only-change-me"),
         PERMANENT_SESSION_LIFETIME=timedelta(days=30),
         SESSION_COOKIE_SAMESITE="Lax",
@@ -28,12 +32,14 @@ def create_app(test_config=None):
     )
     if test_config:
         app.config.update(test_config)
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)  # Render terminates HTTPS
     db.init_app(app)
     with app.app_context():
         db.create_all()
         if not Course.query.first():
             from seed import seed
             seed()
+        db.engine.dispose()  # gunicorn --preload: don't share connections across forked workers
 
     register_routes(app)
     return app

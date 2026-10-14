@@ -14,6 +14,9 @@ DATA = Path(__file__).parent / "data"
 
 
 def load_seed():
+    """Order: PLANNER_SEED_JSON env var (production) > data/seed.local.json > data/seed.example.json."""
+    if os.environ.get("PLANNER_SEED_JSON") and os.environ.get("PLANNER_SEED") != "example":
+        return json.loads(os.environ["PLANNER_SEED_JSON"])
     path = DATA / "seed.local.json"
     if os.environ.get("PLANNER_SEED") == "example" or not path.exists():
         path = DATA / "seed.example.json"

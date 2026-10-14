@@ -14,6 +14,8 @@ PROFILE_FILE = Path(__file__).parent / "data" / "profile.local.txt"  # gitignore
 
 
 def _profile():
+    if os.environ.get("OWNER_PROFILE"):
+        return os.environ["OWNER_PROFILE"].strip()
     return PROFILE_FILE.read_text().strip() if PROFILE_FILE.exists() else ""
 
 

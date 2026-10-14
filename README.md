@@ -27,7 +27,9 @@ Rebuild after front-end edits: `python build_demo.py`.
 ## Deploy (Render)
 
 1. Push to GitHub, then New → Blueprint on Render (uses `render.yaml`).
-2. Set `APP_PASSWORD`, `ANTHROPIC_API_KEY`, `DATABASE_URL` (Neon or Render Postgres).
+2. Set `APP_PASSWORD`, `ANTHROPIC_API_KEY`, `DATABASE_URL` (Neon or Render Postgres),
+   and paste your private files into env vars: `PLANNER_SEED_JSON` (= `data/seed.local.json`) and
+   `OWNER_PROFILE` (= `data/profile.local.txt`). The seed is read once, when the database is empty.
 3. On the phone: open the site → Share → **Add to Home Screen** (iOS) / **Install app** (Android).
 
 ## Layout
