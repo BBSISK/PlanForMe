@@ -1,13 +1,13 @@
 """Free-slot finder and weekly study planner (v1 greedy heuristic, ARCHITECTURE.md §6)."""
 from datetime import date, datetime, time, timedelta
 
-from models import BLOCKING, Constraint, Course, Item, Milestone, Goal, db
+from models import BLOCKING, Constraint, Course, Item, Milestone, Goal, db, active_constraints
 
 DAY_START = time(7, 0)
 DAY_END = time(22, 0)
 BUFFER = timedelta(minutes=15)
 BLOCK_MAX = timedelta(minutes=90)
-BLOCK_MIN = timedelta(minutes=45)
+BLOCK_MIN = timedelta(minutes=30)
 MAX_BLOCKS_PER_COURSE_PER_DAY = 2
 
 
@@ -27,8 +27,8 @@ def _subtract(windows, busy_start, busy_end):
 def busy_blocks(day: date):
     """(start, end, label) for constraints + timed items on a day."""
     blocks = []
-    for c in Constraint.query.filter(Constraint.kind.in_(BLOCKING)).all():
-        if day.weekday() in c.days():
+    for c in active_constraints(day, BLOCKING):
+        if True:
             blocks.append((datetime.combine(day, c.start_time), datetime.combine(day, c.end_time), f"{c.label} {c.room}".strip()))
     start = datetime.combine(day, time.min)
     for it in Item.query.filter(Item.start >= start, Item.start < start + timedelta(days=1),
@@ -50,8 +50,8 @@ def free_slots(day: date, min_minutes: int = 30, extra_busy=()):
 
 def preferred_windows(day: date):
     out = []
-    for c in Constraint.query.filter_by(kind="preferred_study").all():
-        if day.weekday() in c.days():
+    for c in active_constraints(day, ("preferred_study",)):
+        if True:
             out.append((datetime.combine(day, c.start_time), datetime.combine(day, c.end_time)))
     return out
 

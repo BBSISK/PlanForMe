@@ -9,7 +9,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from flask import (Flask, jsonify, redirect, render_template, request, send_from_directory,
                    session, url_for, abort)
 
-from models import db, Item, Course, Goal, Milestone, Constraint, BLOCKING
+from models import db, Item, Course, Goal, Milestone, Constraint, BLOCKING, CalendarDay, active_constraints, day_offs
 import scheduler
 import tools
 
@@ -154,10 +154,11 @@ def register_routes(app):
         overdue = [i.to_dict() for i in Item.query.filter(
             Item.status == "todo", Item.kind.in_(("task", "deadline")), Item.start.is_(None),
             Item.due < day).order_by(Item.due).limit(10)] if day == date.today() else []
-        fixed = [c.to_dict() for c in Constraint.query.filter(Constraint.kind.in_(BLOCKING)).order_by(Constraint.start_time) if day.weekday() in c.days()]
+        fixed = [c.to_dict() for c in active_constraints(day, BLOCKING)]
+        off = [o.to_dict() for o in day_offs(day)]
         todo = [i for i in items + overdue if i["status"] == "todo" and i["kind"] in ("task", "deadline", "study")]
         priorities = sorted(todo, key=lambda i: (i["priority"], i["start"] or "99"))[:3]
-        return jsonify(date=day.isoformat(), items=items, overdue=overdue, fixed=fixed,
+        return jsonify(date=day.isoformat(), items=items, overdue=overdue, fixed=fixed, off=off,
                        priorities=priorities, free=tools.find_free_slots(day.isoformat()))
 
     @app.get("/api/week/<d>")
@@ -170,7 +171,12 @@ def register_routes(app):
                      "scheduled": round(scheduler.study_hours(c.id, monday), 2)}
                     for c in Course.query.filter_by(active=True).order_by(Course.code)]
         cons = [c.to_dict() for c in Constraint.query.all()]
-        return jsonify(monday=monday.isoformat(), items=items, progress=progress, constraints=cons)
+        days = {}
+        for n in range(7):
+            d_ = monday + timedelta(days=n)
+            days[d_.isoformat()] = {"fixed": [c.to_dict() for c in active_constraints(d_, BLOCKING)],
+                                    "off": [o.to_dict() for o in day_offs(d_)]}
+        return jsonify(monday=monday.isoformat(), items=items, progress=progress, constraints=cons, days=days)
 
     @app.post("/api/plan/week")
     @login_required
@@ -185,14 +191,15 @@ def register_routes(app):
         return jsonify(tools.get_education_plan())
 
     # ------------------------------------------------------------ reference data
-    simple = {"courses": Course, "goals": Goal, "milestones": Milestone, "constraints": Constraint}
+    simple = {"courses": Course, "goals": Goal, "milestones": Milestone, "constraints": Constraint,
+              "calendar": CalendarDay}
 
-    @app.get("/api/<any(courses, goals, milestones, constraints):kind>")
+    @app.get("/api/<any(courses, goals, milestones, constraints, calendar):kind>")
     @login_required
     def ref_list(kind):
         return jsonify([o.to_dict() for o in simple[kind].query.all()])
 
-    @app.post("/api/<any(courses, goals, milestones, constraints):kind>")
+    @app.post("/api/<any(courses, goals, milestones, constraints, calendar):kind>")
     @login_required
     def ref_create(kind):
         body = request.get_json(force=True)
@@ -202,7 +209,7 @@ def register_routes(app):
         db.session.commit()
         return jsonify(obj.to_dict()), 201
 
-    @app.patch("/api/<any(courses, goals, milestones, constraints):kind>/<int:oid>")
+    @app.patch("/api/<any(courses, goals, milestones, constraints, calendar):kind>/<int:oid>")
     @login_required
     def ref_update(kind, oid):
         obj = db.get_or_404(simple[kind], oid)

@@ -20,6 +20,7 @@
   const daysUntil = (s) => Math.round((parseD(s) - parseD(iso(new Date()))) / 864e5);
 
   const DAY_START = 7, DAY_END = 22;
+  const OFF_TEXT = { bank_holiday: "Bank holiday · no lectures", no_lectures: "No lectures", exams: "Exams · no lectures" };
 
   // ---------------------------------------------------------------- state
   const state = { view: "day", cursor: new Date(), courses: [], history: [], proposal: null };
@@ -76,7 +77,9 @@
         <button class="check ${i.status === "done" ? "done" : ""}" data-toggle="${i.id}" aria-label="Mark done">✓</button>
       </li>`).join("") : `<li class="empty">Nothing urgent. Add a task or ask Claude to plan the day.</li>`;
 
-    view.innerHTML = `
+    const offBanner = (data.off || []).length ? `<section class="off-banner">${data.off.map((o) =>
+      `<div class="off off-${o.kind}"><b>${esc(o.label)}</b><span>${OFF_TEXT[o.kind] || ""}</span></div>`).join("")}</section>` : "";
+    view.innerHTML = `${offBanner}
       <section><h2>Top 3 ${badge}</h2><ol class="prio-list">${prio}</ol></section>
       <section><h2>Timeline</h2>${timeline(timed, data.fixed, isToday, key)}</section>
       <section><h2>Tasks & deadlines</h2>${rows(untimed)}</section>
@@ -141,7 +144,9 @@
       const d = addDays(mon, n), key = iso(d);
       const its = data.items.filter((i) => (i.start || i.due || "").slice(0, 10) === key);
       const pp = prop.filter((x) => x.start.slice(0, 10) === key);
-      const dayCons = data.constraints.filter((c) => c.weekdays.includes(n));
+      const dayInfo = (data.days && data.days[key]) || { fixed: data.constraints.filter((c) => c.weekdays.includes(n)), off: [] };
+      const dayCons = dayInfo.fixed;
+      const offChip = dayInfo.off.length ? `<span class="off-chip off-${dayInfo.off[0].kind}">${esc(dayInfo.off[0].label)}</span>` : "";
       const fx = dayCons.filter((c) => c.kind === "busy" || c.kind === "class")
         .map((c) => `<i class="${c.kind === "class" ? "cl" : "fx"}" style="--c:${c.colour || "var(--accent)"};${pos(parseDT(key + "T" + c.start_time), parseDT(key + "T" + c.end_time))}"></i>`).join("");
       const classes = dayCons.filter((c) => c.kind === "class").sort((a, b) => a.start_time.localeCompare(b.start_time));
@@ -152,7 +157,7 @@
           <time>${i.start ? hm(i.start) : "—"}</time><span>${esc(i.title)}</span></li>`).join("")
         + pp.map((x) => `<li class="pp"><span class="dot" style="--c:${courseColour(x.course_code)}"></span><time>${hm(x.start)}</time><span>${esc(x.title)} (proposed)</span></li>`).join("");
       days += `<div class="wday ${key === iso(new Date()) ? "today" : ""}">
-        <div class="wday-head"><b>${DAYS[n]} ${d.getDate()}</b><span>${classes.length ? classes.length + " class" + (classes.length > 1 ? "es · " : " · ") : ""}${its.length} item${its.length === 1 ? "" : "s"}</span></div>
+        <div class="wday-head"><b>${DAYS[n]} ${d.getDate()} ${offChip}</b><span>${classes.length ? classes.length + " class" + (classes.length > 1 ? "es · " : " · ") : ""}${its.length} item${its.length === 1 ? "" : "s"}</span></div>
         <div><div class="strip">${fx}${strip}</div><div class="strip-scale"><span>07</span><span>12</span><span>17</span><span>22</span></div></div>
         ${classLine}
         ${list ? `<ul>${list}</ul>` : ""}</div>`;
@@ -201,6 +206,8 @@
       <section><h2>Modules · weekly study target ${badge}</h2><div style="display:grid;gap:8px">${courses}</div></section>
       <section><h2>Deadlines · next 4 weeks</h2>${rows(plan.deadlines_next_4_weeks)}</section>
       <section><h2>Goals & milestones</h2><div style="display:grid;gap:8px">${goals}</div></section>
+      <section><h2>Key dates</h2>${(plan.calendar || []).length ? `<div class="fixed-list">${plan.calendar.map((c) =>
+        `<div><span>${esc(c.label)}</span><span>${fmtShort(parseD(c.start))}${c.end !== c.start ? " – " + fmtShort(parseD(c.end)) : ""}</span></div>`).join("")}</div>` : `<div class="empty">No calendar dates added.</div>`}</section>
       <section><h2>Timetable</h2><div class="tt">${tt || `<div class="empty">No classes yet.</div>`}</div></section>
       <section><h2>Study windows & other fixed time</h2><div class="fixed-list">${fixed}</div></section>`;
   }
@@ -329,6 +336,14 @@
       ...(SEED.study_windows || []).map((w) => ({ id: cn++, label: w.label, weekdays: w.weekdays, start_time: w.start, end_time: w.end, kind: "preferred_study", room: "", note: "" })),
       ...(SEED.busy || []).map((w) => ({ id: cn++, label: w.label, weekdays: w.weekdays, start_time: w.start, end_time: w.end, kind: "busy", room: "", note: "" })),
     ];
+    const CAL = SEED.calendar || [], TERM = SEED.term || {};
+    const offsOn = (key) => CAL.filter((c) => c.start <= key && (c.end || c.start) >= key).map((c) => ({ ...c, end: c.end || c.start }));
+    const activeOn = (c, key) => {
+      const wd = (parseD(key).getDay() + 6) % 7;
+      if (!c.weekdays.includes(wd)) return false;
+      if (c.kind === "class" && ((TERM.start && key < TERM.start) || (TERM.end && key > TERM.end) || offsOn(key).length)) return false;
+      return true;
+    };
     let mn = 1;
     const goals = (SEED.goals || []).map((g, n) => ({ id: n + 1, title: g.title, target_date: g.target_date,
       milestones: (g.milestones || []).map((m) => ({ id: mn++, goal_id: n + 1, title: m.title, due: m.due, done: false })) }));
@@ -353,7 +368,7 @@
 
     function busy(key, extra = []) {
       const wd = (parseD(key).getDay() + 6) % 7;
-      const b = constraints.filter((c) => (c.kind === "busy" || c.kind === "class") && c.weekdays.includes(wd)).map((c) => [parseDT(`${key}T${c.start_time}`), parseDT(`${key}T${c.end_time}`)]);
+      const b = constraints.filter((c) => (c.kind === "busy" || c.kind === "class") && activeOn(c, key)).map((c) => [parseDT(`${key}T${c.start_time}`), parseDT(`${key}T${c.end_time}`)]);
       items.filter((i) => i.start && dayOf(i) === key && i.status !== "skipped").forEach((i) => b.push([parseDT(i.start), parseDT(i.end)]));
       extra.filter((x) => x.start.slice(0, 10) === key).forEach((x) => b.push([parseDT(x.start), parseDT(x.end)]));
       return b;
@@ -382,15 +397,15 @@
         progress = false;
         for (const c of order) {
           if (deficit[c.id] <= 0) continue;
-          const want = Math.min(90, Math.max(45, deficit[c.id] * 60));
+          const want = Math.min(90, Math.max(30, deficit[c.id] * 60));
           let slot = null;
           for (const prefer of [true, false]) {
             for (const k of days) {
               if ((perDay[c.id + k] || 0) >= 2 || slot) continue;
               const wd = (parseD(k).getDay() + 6) % 7;
-              const pw = constraints.filter((x) => x.kind === "preferred_study" && x.weekdays.includes(wd)).map((x) => [parseDT(`${k}T${x.start_time}`), parseDT(`${k}T${x.end_time}`)]);
-              for (const [a, b] of free(k, 45, placed)) {
-                const cands = prefer ? pw.map(([p, q]) => [a > p ? a : p, b < q ? b : q]).filter(([x, y]) => (y - x) / 6e4 >= 45) : [[a, b]];
+              const pw = constraints.filter((x) => x.kind === "preferred_study" && activeOn(x, k)).map((x) => [parseDT(`${k}T${x.start_time}`), parseDT(`${k}T${x.end_time}`)]);
+              for (const [a, b] of free(k, 30, placed)) {
+                const cands = prefer ? pw.map(([p, q]) => [a > p ? a : p, b < q ? b : q]).filter(([x, y]) => (y - x) / 6e4 >= 30) : [[a, b]];
                 if (cands.length) { const [x, y] = cands[0]; slot = [x, new Date(Math.min(+y, +x + want * 6e4))]; break; }
               }
             }
@@ -492,19 +507,23 @@
           const wd = (parseD(key).getDay() + 6) % 7;
           const todo = [...its, ...overdue].filter((i) => i.status === "todo" && ["task", "deadline", "study"].includes(i.kind));
           const priorities = todo.sort((a, b) => a.priority - b.priority || String(a.start || "99").localeCompare(String(b.start || "99"))).slice(0, 3);
-          return ok({ date: key, items: its, overdue, fixed: constraints.filter((c) => (c.kind === "busy" || c.kind === "class") && c.weekdays.includes(wd)).sort((a, b) => a.start_time.localeCompare(b.start_time)), priorities,
+          return ok({ date: key, items: its, overdue, fixed: constraints.filter((c) => (c.kind === "busy" || c.kind === "class") && activeOn(c, key)).sort((a, b) => a.start_time.localeCompare(b.start_time)), off: offsOn(key), priorities,
             free: free(key).map(([a, b]) => ({ start: hm(isoDT(a)), end: hm(isoDT(b)), minutes: Math.round((b - a) / 6e4) })) });
         }
         if (method === "GET" && (m = p.match(/^\/api\/week\/(.+)$/))) {
           const mon = iso(mondayOf(parseD(m[1])));
-          return ok({ monday: mon, items: listItems(mon, iso(addDays(parseD(mon), 6))), constraints,
+          const days = {};
+          for (let n = 0; n < 7; n++) { const k = iso(addDays(parseD(mon), n));
+            days[k] = { fixed: constraints.filter((c) => (c.kind === "busy" || c.kind === "class") && activeOn(c, k)), off: offsOn(k) }; }
+          return ok({ monday: mon, items: listItems(mon, iso(addDays(parseD(mon), 6))), constraints, days,
             progress: courses.map((c) => ({ code: c.code, colour: c.colour, target: c.weekly_target_hours, scheduled: Math.round(studyHours(c.id, mon) * 100) / 100 })) });
         }
         if (method === "GET" && p === "/api/plan") {
           const mon = iso(mondayOf(new Date())), t = iso(new Date()), t28 = iso(addDays(new Date(), 28));
           return ok({ week_of: mon, courses: courses.map((c) => ({ ...c, hours_this_week: Math.round(studyHours(c.id, mon) * 100) / 100 })), goals,
             upcoming_milestones: goals.flatMap((g) => g.milestones).filter((x) => !x.done),
-            deadlines_next_4_weeks: listItems(t, t28).filter((i) => i.kind === "deadline") });
+            deadlines_next_4_weeks: listItems(t, t28).filter((i) => i.kind === "deadline"),
+            calendar: CAL.filter((c) => (c.end || c.start) >= t).slice(0, 12).map((c) => ({ ...c, end: c.end || c.start })) });
         }
         if (method === "POST" && p === "/api/items") return ok(create(body));
         if (method === "PATCH" && (m = p.match(/^\/api\/items\/(\d+)$/))) return ok(update(Number(m[1]), body));

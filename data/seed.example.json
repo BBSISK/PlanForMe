@@ -81,5 +81,22 @@
         }
       ]
     }
+  ],
+  "term": {
+    "start": "2026-09-21",
+    "end": "2026-12-18"
+  },
+  "calendar": [
+    {
+      "start": "2026-10-26",
+      "end": "2026-10-30",
+      "label": "Study week",
+      "kind": "no_lectures"
+    },
+    {
+      "start": "2026-10-26",
+      "label": "October bank holiday",
+      "kind": "bank_holiday"
+    }
   ]
 }

@@ -198,8 +198,10 @@ def get_education_plan():
     upcoming = [m.to_dict() for m in Milestone.query.filter(Milestone.done.is_(False))
                 .order_by(Milestone.due).limit(10).all()]
     deadlines = list_items(today.isoformat(), (today + timedelta(days=28)).isoformat(), kind="deadline")
+    from models import CalendarDay
+    cal = [c.to_dict() for c in CalendarDay.query.filter(CalendarDay.end >= today).order_by(CalendarDay.start).limit(12)]
     return {"week_of": monday.isoformat(), "courses": courses, "goals": goals,
-            "upcoming_milestones": upcoming, "deadlines_next_4_weeks": deadlines}
+            "upcoming_milestones": upcoming, "deadlines_next_4_weeks": deadlines, "calendar": cal}
 
 
 def add_milestone(goal_title, title, due=None, course_code=None):
@@ -243,9 +245,15 @@ def execute(name, args):
 def context_snapshot():
     """Compact context for Claude's system prompt."""
     now = datetime.now()
-    cons = [{k: v for k, v in c.to_dict().items() if k in ("label", "room", "weekdays", "start_time", "end_time", "kind")}
+    cons = [{k: v for k, v in c.to_dict().items()
+             if k in ("label", "room", "weekdays", "start_time", "end_time", "kind", "valid_from", "valid_to")}
             for c in Constraint.query.all()]
     courses = [f"{c.code} ({c.name}, target {c.weekly_target_hours}h/wk)"
                for c in Course.query.filter_by(active=True).order_by(Course.code)]
-    return {"now": now.strftime("%A %d %B %Y, %H:%M"), "today": now.date().isoformat(),
-            "constraints": cons, "courses": courses}
+    from models import CalendarDay
+    today = now.date()
+    cal = [c.to_dict() for c in CalendarDay.query.filter(CalendarDay.end >= today,
+                                                          CalendarDay.start <= today + timedelta(days=60))
+           .order_by(CalendarDay.start)]
+    return {"now": now.strftime("%A %d %B %Y, %H:%M"), "today": today.isoformat(),
+            "constraints": cons, "courses": courses, "calendar": cal}

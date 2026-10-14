@@ -61,3 +61,25 @@ def test_day_view_shape(client):
 def test_chat_without_key(client, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     assert "ANTHROPIC_API_KEY" in client.post("/api/chat", json={"message": "hi"}).json["reply"]
+
+
+def test_bank_holiday_cancels_classes_not_other_commitments(app):
+    from models import CalendarDay, Constraint, active_constraints
+    from datetime import time as t_
+    with app.app_context():
+        wed = monday() + timedelta(days=9)
+        db.session.add(Constraint(label="Volunteering", weekdays=str(wed.weekday()), kind="busy",
+                                  start_time=t_(18), end_time=t_(20)))
+        db.session.commit()
+        before = {c.label for c in active_constraints(wed)}
+        assert "CS102" in before and "Volunteering" in before
+        db.session.add(CalendarDay(start=wed, end=wed, label="Test holiday", kind="bank_holiday"))
+        db.session.commit()
+        after = {c.label for c in active_constraints(wed)}
+        assert "CS102" not in after and "Volunteering" in after
+        assert any(s["start"] <= "14:00" and s["end"] >= "16:00" for s in tools.find_free_slots(wed.isoformat()))
+
+
+def test_study_blocks_can_be_30_minutes(app):
+    import scheduler
+    assert scheduler.BLOCK_MIN == timedelta(minutes=30)

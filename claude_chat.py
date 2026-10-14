@@ -25,6 +25,7 @@ You manage their daily and weekly plan.
 
 Now: {now} (Europe/Dublin). Today = {today}.
 Fixed commitments (constraints): {constraints}
+Academic calendar, next 60 days (no lectures on these dates): {calendar}
 Active courses: {courses}
 
 Rules:
@@ -45,7 +46,7 @@ def run_chat(message, history=None):
     client = anthropic.Anthropic()
     ctx = tools.context_snapshot()
     system = SYSTEM.format(owner=OWNER, profile=_profile(), now=ctx["now"], today=ctx["today"],
-                           constraints=json.dumps(ctx["constraints"]), courses="; ".join(ctx["courses"]))
+                           constraints=json.dumps(ctx["constraints"]), calendar=json.dumps(ctx["calendar"]), courses="; ".join(ctx["courses"]))
     messages = list(history or [])[-10:] + [{"role": "user", "content": message}]
     changes, calls = [], []
 

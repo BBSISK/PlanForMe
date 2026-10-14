@@ -8,7 +8,7 @@ import os
 from datetime import date, time
 from pathlib import Path
 
-from models import db, Course, Constraint, Goal, Milestone
+from models import db, Course, Constraint, Goal, Milestone, CalendarDay
 
 DATA = Path(__file__).parent / "data"
 
@@ -36,14 +36,21 @@ def seed():
         db.session.add(course)
         db.session.flush()
         ids[c["code"]] = course.id
+    term = data.get("term", {})
+    t_from = date.fromisoformat(term["start"]) if term.get("start") else None
+    t_to = date.fromisoformat(term["end"]) if term.get("end") else None
     for t in data.get("timetable", []):
         db.session.add(Constraint(label=t["code"], room=t.get("room", ""), note=t.get("note", ""),
+                                  valid_from=t_from, valid_to=t_to,
                                   weekdays=_days(t["weekday"]), start_time=time.fromisoformat(t["start"]),
                                   end_time=time.fromisoformat(t["end"]), kind="class", course_id=ids[t["code"]]))
     for kind, key in (("preferred_study", "study_windows"), ("busy", "busy")):
         for w in data.get(key, []):
             db.session.add(Constraint(label=w["label"], weekdays=_days(w["weekdays"]), kind=kind,
                                       start_time=time.fromisoformat(w["start"]), end_time=time.fromisoformat(w["end"])))
+    for c in data.get("calendar", []):
+        db.session.add(CalendarDay(start=date.fromisoformat(c["start"]), end=date.fromisoformat(c.get("end") or c["start"]),
+                                   label=c["label"], kind=c.get("kind", "no_lectures")))
     for g in data.get("goals", []):
         goal = Goal(title=g["title"], target_date=date.fromisoformat(g["target_date"]) if g.get("target_date") else None)
         db.session.add(goal)

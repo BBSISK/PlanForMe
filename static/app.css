@@ -210,3 +210,14 @@ section h2 { font: 600 .78rem/1 var(--font-body); text-transform: uppercase; let
 .tt-row code { font: 600 .8rem var(--font-mono); }
 .tt-row span { color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
 .tt-row.check-me span { color: var(--danger); }
+
+/* academic calendar */
+.off-banner { display: grid; gap: 6px; }
+.off { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; padding: 10px 12px; border-radius: 12px;
+  background: color-mix(in srgb, var(--mark) 30%, var(--surface)); border: 1px solid color-mix(in srgb, var(--mark) 60%, var(--line)); }
+.off b { font: 600 .95rem var(--font-display); }
+.off span { color: var(--muted); font-size: .8rem; }
+.off-exams { background: color-mix(in srgb, var(--danger) 12%, var(--surface)); border-color: color-mix(in srgb, var(--danger) 35%, var(--line)); }
+.off-chip { font: 500 .66rem var(--font-mono); padding: 2px 6px; border-radius: 99px; margin-left: 6px; vertical-align: middle;
+  background: color-mix(in srgb, var(--mark) 45%, transparent); color: var(--ink); white-space: nowrap; }
+.off-chip.off-exams { background: color-mix(in srgb, var(--danger) 20%, transparent); }

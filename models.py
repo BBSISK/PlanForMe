@@ -65,11 +65,25 @@ class Constraint(db.Model):
     course_id = db.Column(db.Integer, db.ForeignKey("courses.id"))
     room = db.Column(db.String(60), default="")
     note = db.Column(db.String(200), default="")
+    valid_from = db.Column(db.Date)   # e.g. first day of lectures; None = always
+    valid_to = db.Column(db.Date)     # e.g. last day of lectures
 
     course = db.relationship("Course")
 
     def days(self):
         return {int(d) for d in self.weekdays.split(",") if d.strip() != ""}
+
+    def active_on(self, day, offs=None):
+        """Does this recurring block happen on `day`? Classes skip bank holidays, study weeks, exams."""
+        if day.weekday() not in self.days():
+            return False
+        if (self.valid_from and day < self.valid_from) or (self.valid_to and day > self.valid_to):
+            return False
+        if self.kind == "class":
+            offs = day_offs(day) if offs is None else offs
+            if offs:
+                return False
+        return True
 
     def to_dict(self):
         return {"id": self.id, "label": self.label, "weekdays": sorted(self.days()),
@@ -77,10 +91,37 @@ class Constraint(db.Model):
                 "end_time": self.end_time.strftime("%H:%M"), "kind": self.kind,
                 "course_code": self.course.code if self.course else None,
                 "colour": self.course.colour if self.course else None,
-                "room": self.room or "", "note": self.note or ""}
+                "room": self.room or "", "note": self.note or "",
+                "valid_from": _iso(self.valid_from), "valid_to": _iso(self.valid_to)}
 
 
 BLOCKING = ("busy", "class")
+CAL_KINDS = ("bank_holiday", "no_lectures", "exams")
+
+
+class CalendarDay(db.Model):
+    """Academic calendar and public holidays: a date or date range on which lectures don't run."""
+    __tablename__ = "calendar"
+    id = db.Column(db.Integer, primary_key=True)
+    start = db.Column(db.Date, nullable=False)
+    end = db.Column(db.Date, nullable=False)
+    label = db.Column(db.String(120), nullable=False)
+    kind = db.Column(db.String(20), default="no_lectures")  # bank_holiday | no_lectures | exams
+
+    def to_dict(self):
+        return {"id": self.id, "start": _iso(self.start), "end": _iso(self.end), "label": self.label, "kind": self.kind}
+
+
+def day_offs(day):
+    return CalendarDay.query.filter(CalendarDay.start <= day, CalendarDay.end >= day).order_by(CalendarDay.kind).all()
+
+
+def active_constraints(day, kinds=None):
+    offs = day_offs(day)
+    q = Constraint.query
+    if kinds:
+        q = q.filter(Constraint.kind.in_(kinds))
+    return [c for c in q.order_by(Constraint.start_time).all() if c.active_on(day, offs)]
 
 
 class Item(db.Model):
