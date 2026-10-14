@@ -97,3 +97,19 @@ def test_term_only_commitment_skips_holidays(app):
         db.session.commit()
         labels = {c.label for c in active_constraints(wed)}
         assert "Volunteering" not in labels and "Gym" in labels
+
+
+def test_pwa_assets_are_versioned_per_deploy(app, client, monkeypatch):
+    v = app.config["ASSET_VERSION"]
+    assert v and len(v) == 10
+    sw = client.get("/sw.js")
+    assert sw.status_code == 200 and sw.headers["Cache-Control"] == "no-cache"
+    body = sw.get_data(as_text=True)
+    assert "__VERSION__" not in body and f'planner-{v}' in body and f"app.js?v={v}" in body
+    page = client.get("/").get_data(as_text=True)
+    assert f"app.js?v={v}" in page and f"app.css?v={v}" in page
+    # Render's commit SHA wins when present
+    monkeypatch.setenv("RENDER_GIT_COMMIT", "abcdef1234567890")
+    from app import create_app
+    a2 = create_app({"SQLALCHEMY_DATABASE_URI": app.config["SQLALCHEMY_DATABASE_URI"]})
+    assert a2.config["ASSET_VERSION"] == "abcdef1234"

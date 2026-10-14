@@ -41,8 +41,29 @@ def create_app(test_config=None):
             seed()
         db.engine.dispose()  # gunicorn --preload: don't share connections across forked workers
 
+    app.config["ASSET_VERSION"] = _asset_version(app)
+
+    @app.context_processor
+    def _asset_v():
+        return {"asset_v": app.config["ASSET_VERSION"]}
+
     register_routes(app)
     return app
+
+
+def _asset_version(app):
+    """Changes on every deploy: Render's commit SHA, else a hash of the front-end files."""
+    sha = os.environ.get("RENDER_GIT_COMMIT", "")
+    if sha:
+        return sha[:10]
+    import hashlib
+    h = hashlib.sha1()
+    for name in ("app.js", "app.css", "sw.js"):
+        p = os.path.join(app.static_folder, name)
+        if os.path.exists(p):
+            with open(p, "rb") as f:
+                h.update(f.read())
+    return h.hexdigest()[:10]
 
 
 # ---------------------------------------------------------------- auth
@@ -101,7 +122,9 @@ def register_routes(app):
     # service worker must be served from root scope
     @app.route("/sw.js")
     def sw():
-        resp = send_from_directory(app.static_folder, "sw.js")
+        with open(os.path.join(app.static_folder, "sw.js")) as f:
+            body = f.read().replace("__VERSION__", app.config["ASSET_VERSION"])
+        resp = app.response_class(body, mimetype="application/javascript")
         resp.headers["Cache-Control"] = "no-cache"
         resp.headers["Service-Worker-Allowed"] = "/"
         return resp
