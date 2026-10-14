@@ -6,7 +6,7 @@ from models import Todo, db
 
 def test_todo_lifecycle(client):
     t = client.post("/api/todos", json={"title": "Book NCT", "due": date.today().isoformat(), "priority": 1}).json
-    assert t["status"] == "open" and t["priority"] == 1
+    assert t["status"] == "open" and t["priority"] == 1 and t["start_date"] == date.today().isoformat()
     lst = client.get("/api/todos?view=open").json
     assert lst["counts"]["open"] == 1 and lst["todos"][0]["title"] == "Book NCT"
     # close without, then add comment later: done_at is kept
@@ -67,3 +67,26 @@ def test_claude_tools(app):
         assert err and "No to-do" in out["error"]
         assert {"add_todo", "complete_todo"} <= tools.WRITES
         assert any(t["name"] == "list_todos" for t in tools.TOOLS)
+
+
+def test_priority_order_and_words(client):
+    for title, p in (("none", None), ("low", 3), ("high", "high"), ("medium", 2)):
+        client.post("/api/todos", json={"title": title, **({"priority": p} if p is not None else {})})
+    assert [t["title"] for t in client.get("/api/todos").json["todos"]] == ["high", "medium", "low", "none"]
+
+
+def test_start_date_controls_daily_list(client):
+    today = date.today()
+    client.post("/api/todos", json={"title": "started", "start_date": (today - timedelta(days=4)).isoformat()})
+    client.post("/api/todos", json={"title": "future", "start_date": (today + timedelta(days=2)).isoformat()})
+    daily = [t["title"] for t in client.get(f"/api/todos?view=open&active_on={today.isoformat()}").json["todos"]]
+    assert daily == ["started"]  # open items keep showing every day until closed; future ones wait
+    later = (today + timedelta(days=3)).isoformat()
+    assert {t["title"] for t in client.get(f"/api/todos?view=open&active_on={later}").json["todos"]} == {"started", "future"}
+
+
+def test_due_before_start_rejected(client):
+    today = date.today()
+    r = client.post("/api/todos", json={"title": "x", "start_date": today.isoformat(),
+                                         "due": (today - timedelta(days=1)).isoformat()})
+    assert r.status_code == 400 and "before the start" in r.json["error"]

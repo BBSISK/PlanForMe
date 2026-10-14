@@ -208,7 +208,8 @@ class Todo(db.Model):
     title = db.Column(db.String(300), nullable=False)
     notes = db.Column(db.Text, default="")
     due = db.Column(db.Date)
-    priority = db.Column(db.Integer, default=2)  # 1 = flagged, 2 = normal
+    start_date = db.Column(db.Date, default=date.today)  # shows on each day from here until closed
+    priority = db.Column(db.Integer, default=4)  # 1 high, 2 medium, 3 low, 4 none
     position = db.Column(db.Integer, default=0)
     status = db.Column(db.String(10), default="open")  # open | done
     done_at = db.Column(db.DateTime)
@@ -220,7 +221,8 @@ class Todo(db.Model):
         archives_on = None
         if self.status == "done" and self.done_at and not self.archived_at:
             archives_on = (self.done_at + timedelta(days=archive_days)).date().isoformat()
+        start = self.start_date or (self.created.date() if self.created else None)
         return {"id": self.id, "title": self.title, "notes": self.notes or "", "due": _iso(self.due),
-                "priority": self.priority, "position": self.position, "status": self.status,
+                "start_date": _iso(start), "priority": self.priority, "position": self.position, "status": self.status,
                 "done_at": _iso(self.done_at), "done_comment": self.done_comment or "",
                 "archived_at": _iso(self.archived_at), "archives_on": archives_on, "created": _iso(self.created)}

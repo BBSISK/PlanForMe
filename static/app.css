@@ -10,6 +10,10 @@
   --mark: #ffd84d;
   --fixed: #e9ecf3;
   --danger: #c23a3a;
+  --p-high: #c9302c;
+  --p-med: #c27c0e;
+  --p-low: #2a73c2;
+  --p-none: #b9c0cf;
   --ok: #1f8a5b;
   --font-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
   --font-body: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
@@ -21,13 +25,13 @@
   :root:not([data-theme="light"]) {
     --bg: #0f1422; --surface: #171e30; --ink: #e7ebf5; --muted: #98a2bd; --line: #2a3350;
     --accent: #8aa6ff; --accent-soft: #212c4d; --mark: #e6c23a; --fixed: #1d2539;
-    --danger: #ff7b7b; --ok: #5fd39c; color-scheme: dark;
+    --danger: #ff7b7b; --p-high: #ff7d74; --p-med: #f2b14a; --p-low: #7db4ff; --p-none: #4a5577; --ok: #5fd39c; color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --bg: #0f1422; --surface: #171e30; --ink: #e7ebf5; --muted: #98a2bd; --line: #2a3350;
   --accent: #8aa6ff; --accent-soft: #212c4d; --mark: #e6c23a; --fixed: #1d2539;
-  --danger: #ff7b7b; --ok: #5fd39c; color-scheme: dark;
+  --danger: #ff7b7b; --p-high: #ff7d74; --p-med: #f2b14a; --p-low: #7db4ff; --p-none: #4a5577; --ok: #5fd39c; color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -252,3 +256,35 @@ section h2 .link { border: 0; background: none; padding: 0; font: 500 .78rem var
 .snack span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .snack button { border: 0; background: none; color: var(--mark); font-weight: 600; padding: 2px 4px; }
 @media (prefers-reduced-motion: no-preference) { .snack:not([hidden]) { animation: up .18s ease-out; } }
+
+/* to-do priority + timing */
+.row.todo { border-left: 4px solid var(--pc, var(--p-none)); }
+.row.todo.prio-1 { --pc: var(--p-high); }
+.row.todo.prio-2 { --pc: var(--p-med); }
+.row.todo.prio-3 { --pc: var(--p-low); }
+.row.todo.prio-4 { --pc: var(--p-none); }
+.row.todo.is-done { border-left-color: var(--line); }
+.row.todo .check:not(.done) { border-color: var(--pc, var(--line)); }
+.tmeta { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; margin-top: 3px; }
+.pchip { font: 600 .66rem var(--font-mono); text-transform: uppercase; letter-spacing: .05em; padding: 1px 6px; border-radius: 99px;
+  color: var(--pc); background: color-mix(in srgb, var(--pc) 14%, transparent); }
+.tm { font: .74rem var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tm.due { color: var(--ink); }
+.tm.due.soon { color: var(--p-med); font-weight: 600; }
+.tm.due.today { color: var(--p-med); font-weight: 600; }
+.tm.due.overdue { color: var(--danger); font-weight: 600; }
+.tm.muted { opacity: .7; }
+.tnote { display: block; font-size: .8rem; color: var(--muted); margin-top: 2px; }
+.prio-pick { display: flex; gap: 4px; flex-wrap: wrap; }
+.prio-pick label { --pc: var(--p-none); border: 1px solid var(--line); border-radius: 99px; padding: 4px 10px; font-size: .78rem; cursor: pointer; }
+.prio-pick label.prio-1 { --pc: var(--p-high); } .prio-pick label.prio-2 { --pc: var(--p-med); } .prio-pick label.prio-3 { --pc: var(--p-low); }
+.prio-pick input { position: absolute; opacity: 0; pointer-events: none; }
+.prio-pick label:has(input:checked) { background: var(--pc); border-color: var(--pc); color: var(--surface); font-weight: 600; }
+.prio-pick label.prio-4:has(input:checked) { color: var(--ink); }
+.prio-pick label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* beat the generic ".row .t span" muted colour */
+.row .t .pchip { color: var(--pc); }
+.row .t .tm.due { color: var(--ink); }
+.row .t .tm.due.soon, .row .t .tm.due.today { color: var(--p-med); }
+.row .t .tm.due.overdue { color: var(--danger); }

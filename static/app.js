@@ -68,7 +68,7 @@
     const isToday = key === iso(new Date());
     setHeader(isToday ? "Today" : DAYS[(d.getDay() + 6) % 7] + " " + fmtShort(d), fmtLong(d));
     const [data, todoData] = await Promise.all([api("GET", `/api/day/${key}`),
-      isToday ? api("GET", `/api/todos?view=open&due_by=${key}`) : Promise.resolve(null)]);
+      api("GET", `/api/todos?view=open&active_on=${key}`)]);
     const timed = data.items.filter((i) => i.start);
     const untimed = [...data.overdue, ...data.items.filter((i) => !i.start)];
 
@@ -86,7 +86,7 @@
       <section><h2>Top 3 ${badge}</h2><ol class="prio-list">${prio}</ol></section>
       <section><h2>Timeline</h2>${timeline(timed, data.fixed, isToday, key)}</section>
       ${todoData ? `<section><h2>To-do <button class="link" data-goto="todo">${todoData.counts.open} open ›</button></h2>${
-        todoData.todos.length ? `<ul class="rows todo-list">${todoData.todos.map(todoRow).join("")}</ul>` : `<div class="empty">Nothing due today.</div>`}</section>` : ""}
+        todoData.todos.length ? `<ul class="rows todo-list">${todoData.todos.map((t) => todoRow(t, key)).join("")}</ul>` : `<div class="empty">No open to-dos.</div>`}</section>` : ""}
       <section><h2>Tasks & deadlines</h2>${rows(untimed)}</section>
       <section><h2>Free time</h2><div class="free-chips">${
         data.free.length ? data.free.map((f) => `<span>${f.start}–${f.end} · ${f.minutes}m</span>`).join("") : `<div class="empty">No gaps left today.</div>`
@@ -219,19 +219,30 @@
 
   // ---------------------------------------------------------------- to-do list
   const TODO_VIEWS = [["open", "Open"], ["done", "Done"], ["archived", "Archive"]];
-  function dueChip(t) {
-    if (!t.due) return "";
-    const n = daysUntil(t.due);
-    const txt = n === 0 ? "Today" : n === 1 ? "Tomorrow" : n === -1 ? "Yesterday" : n < 0 ? `${-n}d overdue` : fmtShort(parseD(t.due));
-    return `<span class="chip ${n < 0 ? "overdue" : n === 0 ? "today" : ""}">${txt}</span>`;
+  const PRIO = { 1: "High", 2: "Medium", 3: "Low", 4: "None" };
+  const dayGap = (from, to) => Math.round((parseD(to) - parseD(from)) / 864e5);
+  // Days open (since start) and days to closure (until due), measured from `onDay` (defaults to today)
+  function todoTiming(t, onDay) {
+    const ref = onDay || iso(new Date());
+    const start = t.start_date || (t.created || ref).slice(0, 10);
+    const bits = [];
+    const opened = dayGap(start, ref);
+    bits.push(opened < 0 ? `<span class="tm">Starts ${fmtShort(parseD(start))}</span>` : `<span class="tm">Open ${opened === 0 ? "today" : opened + "d"}</span>`);
+    if (t.due) {
+      const left = dayGap(ref, t.due);
+      const cls = left < 0 ? "overdue" : left === 0 ? "today" : left <= 2 ? "soon" : "";
+      const txt = left < 0 ? `${-left}d overdue` : left === 0 ? "Due today" : `Due in ${left}d`;
+      bits.push(`<span class="tm due ${cls}" title="Due ${fmtShort(parseD(t.due))}">${txt}</span>`);
+    } else bits.push(`<span class="tm muted">No due date</span>`);
+    return bits.join("");
   }
-  function todoRow(t) {
+  function todoRow(t, onDay) {
     if (t.status === "open") return `
-      <li class="row todo ${t.priority === 1 ? "flagged" : ""}">
+      <li class="row todo prio-${t.priority || 4}">
         <button class="check" data-tdone="${t.id}" aria-label="Close “${esc(t.title)}”"></button>
-        <button class="t" data-tedit="${t.id}"><strong>${t.priority === 1 ? '<span class="flag" aria-label="flagged">⚑</span> ' : ""}${esc(t.title)}</strong>${
-          t.notes ? `<span>${esc(t.notes.slice(0, 80))}</span>` : ""}</button>
-        ${dueChip(t)}
+        <button class="t" data-tedit="${t.id}"><strong>${esc(t.title)}</strong>
+          <span class="tmeta">${(t.priority || 4) < 4 ? `<span class="pchip">${PRIO[t.priority]}</span>` : ""}${todoTiming(t, onDay)}</span>${
+          t.notes ? `<span class="tnote">${esc(t.notes.slice(0, 80))}</span>` : ""}</button>
       </li>`;
     const closed = t.done_at ? fmtShort(parseD(t.done_at)) : "";
     const meta = t.archived_at ? `Closed ${closed} · archived ${fmtShort(parseD(t.archived_at))}`
@@ -258,19 +269,25 @@
         <form class="todo-add" id="todo-add" autocomplete="off">
           <input id="todo-new" placeholder="Add a to-do…" aria-label="New to-do" maxlength="300">
           <div class="todo-add-row">
+            <label class="todo-due">Start <input type="date" id="todo-start" value="${iso(new Date())}" aria-label="Start date"></label>
             <label class="todo-due">Due <input type="date" id="todo-due" aria-label="Due date (optional)"></label>
-            <button type="button" class="mini" id="todo-flag" aria-pressed="false">⚑ Flag</button>
+          </div>
+          <div class="todo-add-row">
+            <div class="prio-pick" role="radiogroup" aria-label="Priority">${[1, 2, 3, 4].map((p) =>
+              `<label class="prio-${p}"><input type="radio" name="todo-prio" value="${p}" ${p === 4 ? "checked" : ""}>${PRIO[p]}</label>`).join("")}</div>
             <button class="btn primary" type="submit">Add</button>
           </div>
         </form>
       </section>
       <div class="seg" role="tablist">${seg}</div>
-      <section>${data.todos.length ? `<ul class="rows todo-list">${data.todos.map(todoRow).join("")}</ul>` : `<div class="empty">${empty}</div>`}</section>`;
-    $("#todo-flag").onclick = (e) => { const b = e.currentTarget; b.setAttribute("aria-pressed", String(b.getAttribute("aria-pressed") !== "true")); };
+      <section>${data.todos.length ? `<ul class="rows todo-list">${data.todos.map((t) => todoRow(t)).join("")}</ul>` : `<div class="empty">${empty}</div>`}</section>`;
     $("#todo-add").addEventListener("submit", async (e) => {
       e.preventDefault();
       const title = $("#todo-new").value.trim(); if (!title) return $("#todo-new").focus();
-      await api("POST", "/api/todos", { title, due: $("#todo-due").value || null, priority: $("#todo-flag").getAttribute("aria-pressed") === "true" ? 1 : 2 });
+      try {
+        await api("POST", "/api/todos", { title, start_date: $("#todo-start").value || null, due: $("#todo-due").value || null,
+          priority: Number((document.querySelector("input[name=todo-prio]:checked") || {}).value || 4) });
+      } catch (err) { return snack(err.message); }
       state.todoView = "open"; await render(); $("#todo-new").focus();
     });
   }
@@ -333,9 +350,11 @@
       <h3>Edit to-do</h3>
       <label class="field">Title<input id="ft-title" required maxlength="300" value="${esc(t.title)}"></label>
       <div class="grid2">
+        <label class="field">Start<input type="date" id="ft-start" value="${t.start_date || ""}"></label>
         <label class="field">Due<input type="date" id="ft-due" value="${t.due || ""}"></label>
-        <label class="field">Priority<select id="ft-priority"><option value="2" ${t.priority !== 1 ? "selected" : ""}>Normal</option><option value="1" ${t.priority === 1 ? "selected" : ""}>⚑ Flagged</option></select></label>
       </div>
+      <label class="field">Priority<select id="ft-priority">${[1, 2, 3, 4].map((p) =>
+        `<option value="${p}" ${(t.priority || 4) === p ? "selected" : ""}>${PRIO[p]}</option>`).join("")}</select></label>
       <label class="field">Notes<textarea id="ft-notes" rows="3">${esc(t.notes || "")}</textarea></label>
       <div class="btn-row"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" data-close>Cancel</button>
         <button class="btn" type="button" id="ft-close">Close with note…</button><button class="btn danger" type="button" id="ft-del">Delete</button></div>
@@ -343,8 +362,10 @@
     sheet.hidden = false; $("#ft-title").focus();
     $("#todo-form").addEventListener("submit", async (e) => {
       e.preventDefault();
-      await api("PATCH", `/api/todos/${t.id}`, { title: $("#ft-title").value, due: $("#ft-due").value || null,
-        priority: Number($("#ft-priority").value), notes: $("#ft-notes").value });
+      try {
+        await api("PATCH", `/api/todos/${t.id}`, { title: $("#ft-title").value, start_date: $("#ft-start").value || null,
+          due: $("#ft-due").value || null, priority: Number($("#ft-priority").value), notes: $("#ft-notes").value });
+      } catch (err) { return snack(err.message); }
       closeSheet(); render();
     });
     $("#ft-close").onclick = () => openCommentSheet(t);
@@ -659,26 +680,27 @@
     let todoId = 100;
     const nowIso = () => isoDT(new Date());
     const todos = [
-      { id: 1, title: "Email CS210 lecturer about assignment 1 (example)", due: iso(today), priority: 1 },
-      { id: 2, title: "Book NCT (example)", due: iso(addDays(today, -2)), priority: 2 },
-      { id: 3, title: "Buy USB-C hub for lab (example)", due: null, priority: 2 },
-      { id: 4, title: "Print CityWise worksheets (example)", due: iso(addDays(today, 3)), priority: 2 },
+      { id: 1, title: "Email CS210 lecturer about assignment 1 (example)", due: iso(today), priority: 1, start_date: iso(addDays(today, -3)) },
+      { id: 2, title: "Book NCT (example)", due: iso(addDays(today, -2)), priority: 2, start_date: iso(addDays(today, -9)) },
+      { id: 3, title: "Buy USB-C hub for lab (example)", due: null, priority: 3, start_date: iso(addDays(today, -1)) },
+      { id: 4, title: "Print CityWise worksheets (example)", due: iso(addDays(today, 5)), priority: 4, start_date: iso(addDays(today, 2)) },
       { id: 5, title: "Renew library books (example)", status: "done", done_at: isoDT(addDays(today, -1)), done_comment: "Renewed online until 5 Nov" },
-    ].map((t) => ({ notes: "", position: t.id, status: "open", done_at: null, done_comment: "", archived_at: null, created: nowIso(), priority: 2, due: null, ...t }));
+    ].map((t) => ({ notes: "", position: t.id, status: "open", done_at: null, done_comment: "", archived_at: null, created: nowIso(), priority: 4, due: null, start_date: iso(today), ...t }));
     const tdict = (t) => ({ ...t, archives_on: t.status === "done" && !t.archived_at && t.done_at ? iso(addDays(parseD(t.done_at), 3)) : null });
     function demoTodos(method, p, q, b) {
       const m = p.match(/^\/api\/todos\/(\d+)$/); const t = m && todos.find((x) => x.id === Number(m[1]));
       if (method === "GET") {
-        const v = q.get("view") || "open", dueBy = q.get("due_by");
+        const v = q.get("view") || "open", dueBy = q.get("due_by"), activeOn = q.get("active_on");
         let list = todos.filter((x) => v === "open" ? x.status === "open" : v === "done" ? x.status === "done" && !x.archived_at : !!x.archived_at);
         if (v === "open" && dueBy) list = list.filter((x) => x.due && x.due <= dueBy);
+        if (v === "open" && activeOn) list = list.filter((x) => !x.start_date || x.start_date <= activeOn);
         list.sort((a, c) => v === "open" ? (a.priority - c.priority) || String(a.due || "9").localeCompare(String(c.due || "9")) : String(c.done_at).localeCompare(String(a.done_at)));
         return { todos: list.map(tdict), archive_after_days: 3, counts: {
           open: todos.filter((x) => x.status === "open").length, done: todos.filter((x) => x.status === "done" && !x.archived_at).length,
           archived: todos.filter((x) => x.archived_at).length } };
       }
       if (method === "POST") {
-        const n = b.restore ? { ...b.restore } : { title: b.title, due: b.due || null, priority: b.priority === 1 ? 1 : 2, notes: b.notes || "",
+        const n = b.restore ? { ...b.restore } : { title: b.title, due: b.due || null, priority: [1, 2, 3, 4].includes(b.priority) ? b.priority : 4, notes: b.notes || "", start_date: b.start_date || iso(today),
           status: "open", done_at: null, done_comment: "", archived_at: null, created: nowIso() };
         n.id = todoId++; todos.push(n); return tdict(n);
       }
@@ -688,7 +710,7 @@
         else if (b.action === "reopen") Object.assign(t, { status: "open", done_at: null, done_comment: "", archived_at: null });
         else if (b.action === "archive") t.archived_at = nowIso();
         else if (b.action === "unarchive") { t.archived_at = null; t.done_at = nowIso(); }
-        else ["title", "due", "priority", "notes"].forEach((k) => { if (k in b) t[k] = b[k]; });
+        else ["title", "due", "priority", "notes", "start_date"].forEach((k) => { if (k in b) t[k] = b[k]; });
         return tdict(t);
       }
     }

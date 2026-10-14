@@ -22,6 +22,20 @@ def _d(v):
     return date.fromisoformat(v[:10]) if v else None
 
 
+PRIORITIES = {1: "high", 2: "medium", 3: "low", 4: "none"}
+_PRIO_WORDS = {v: k for k, v in PRIORITIES.items()} | {"med": 2, "normal": 4, "": 4}
+
+
+def _prio(v):
+    """1 high · 2 medium · 3 low · 4 none. Accepts numbers or words; anything else -> none."""
+    if v is None:
+        return 4
+    if isinstance(v, str) and not v.strip().isdigit():
+        return _PRIO_WORDS.get(v.strip().lower(), 4)
+    n = int(v)
+    return n if n in PRIORITIES else 4
+
+
 def _get(id):
     t = db.session.get(Todo, int(id))
     if not t:
@@ -39,14 +53,17 @@ def auto_archive():
     return n
 
 
-def list_todos(view="open", due_by=None):
-    """view: open | done | archived | all. due_by (YYYY-MM-DD) limits open items to those due on/before it."""
+def list_todos(view="open", due_by=None, active_on=None):
+    """view: open | done | archived. due_by: open items due on/before a date.
+    active_on: open items whose start date is on/before that day (the daily list)."""
     auto_archive()
     q = Todo.query
     if view == "open":
         q = q.filter(Todo.status == "open")
         if due_by:
             q = q.filter(Todo.due.isnot(None), Todo.due <= _d(due_by))
+        if active_on:
+            q = q.filter(db.or_(Todo.start_date.is_(None), Todo.start_date <= _d(active_on)))
     elif view == "done":
         q = q.filter(Todo.status == "done", Todo.archived_at.is_(None))
     elif view == "archived":
@@ -54,7 +71,7 @@ def list_todos(view="open", due_by=None):
     todos = q.all()
     if view == "open":
         far = date.max
-        todos.sort(key=lambda t: (t.priority, t.due or far, t.position, t.id))
+        todos.sort(key=lambda t: (t.priority or 4, t.due or far, t.start_date or far, t.position, t.id))
     else:
         todos.sort(key=lambda t: t.archived_at or t.done_at or datetime.min, reverse=True)
     return [t.to_dict(ARCHIVE_AFTER_DAYS) for t in todos]
@@ -67,19 +84,25 @@ def counts():
             "archived": Todo.query.filter(Todo.archived_at.isnot(None)).count()}
 
 
-def add_todo(title, due=None, priority=2, notes=""):
+def add_todo(title, due=None, priority=4, notes="", start_date=None):
     title = (title or "").strip()
     if not title:
         raise TodoError("A to-do needs a title")
     top = db.session.query(db.func.max(Todo.position)).scalar() or 0
-    t = Todo(title=title, due=_d(due), priority=1 if int(priority or 2) == 1 else 2, notes=notes or "",
+    due_d = _d(due)
+    start = _d(start_date)
+    if start and due_d and due_d < start:
+        raise TodoError("The due date is before the start date")
+    if not start:  # default: today, or the due date if that has already passed
+        start = min(date.today(), due_d) if due_d else date.today()
+    t = Todo(title=title, due=due_d, start_date=start, priority=_prio(priority), notes=notes or "",
              position=top + 1)
     db.session.add(t)
     db.session.commit()
     return t.to_dict(ARCHIVE_AFTER_DAYS)
 
 
-def update_todo(id, title=None, due="__keep__", priority=None, notes=None):
+def update_todo(id, title=None, due="__keep__", priority=None, notes=None, start_date="__keep__"):
     t = _get(id)
     if title is not None:
         if not title.strip():
@@ -87,8 +110,14 @@ def update_todo(id, title=None, due="__keep__", priority=None, notes=None):
         t.title = title.strip()
     if due != "__keep__":
         t.due = _d(due)
+    if start_date != "__keep__":
+        t.start_date = _d(start_date) or date.today()
     if priority is not None:
-        t.priority = 1 if int(priority) == 1 else 2
+        t.priority = _prio(priority)
+    if t.due and t.start_date and t.due < t.start_date:
+        if start_date != "__keep__" and _d(start_date):
+            raise TodoError("The due date is before the start date")
+        t.start_date = t.due  # due moved earlier than the start: start then too
     if notes is not None:
         t.notes = notes
     db.session.commit()
@@ -142,7 +171,8 @@ def delete_todo(id):
 def restore_todo(data):
     """Undo a delete: re-create from the dict delete_todo returned."""
     t = Todo(title=data["title"], notes=data.get("notes", ""), due=_d(data.get("due")),
-             priority=data.get("priority", 2), position=data.get("position", 0),
+             priority=_prio(data.get("priority")), position=data.get("position", 0),
+             start_date=_d(data.get("start_date")) or date.today(),
              status=data.get("status", "open"), done_comment=data.get("done_comment", ""),
              done_at=datetime.fromisoformat(data["done_at"]) if data.get("done_at") else None,
              archived_at=datetime.fromisoformat(data["archived_at"]) if data.get("archived_at") else None,
@@ -167,7 +197,8 @@ def register(app, login_required):
     @bp.get("/api/todos")
     @login_required
     def todos_list():
-        return _run(lambda: {"todos": list_todos(request.args.get("view", "open"), request.args.get("due_by")),
+        return _run(lambda: {"todos": list_todos(request.args.get("view", "open"), request.args.get("due_by"),
+                                                 request.args.get("active_on")),
                              "counts": counts(), "archive_after_days": ARCHIVE_AFTER_DAYS})
 
     @bp.post("/api/todos")
@@ -176,7 +207,7 @@ def register(app, login_required):
         b = request.get_json(force=True) or {}
         if b.get("restore"):
             return _run(restore_todo, b["restore"])
-        return _run(add_todo, b.get("title"), b.get("due"), b.get("priority", 2), b.get("notes", ""))
+        return _run(add_todo, b.get("title"), b.get("due"), b.get("priority", 4), b.get("notes", ""), b.get("start_date"))
 
     @bp.patch("/api/todos/<int:tid>")
     @login_required
@@ -194,6 +225,8 @@ def register(app, login_required):
         kw = {k: b[k] for k in ("title", "priority", "notes") if k in b}
         if "due" in b:
             kw["due"] = b["due"]
+        if "start_date" in b:
+            kw["start_date"] = b["start_date"]
         return _run(update_todo, tid, **kw)
 
     @bp.delete("/api/todos/<int:tid>")
@@ -207,20 +240,25 @@ def register(app, login_required):
 # ------------------------------------------------------------------ Claude tools
 TOOLS = [
     {"name": "list_todos",
-     "description": "List to-dos. view: open (default) | done | archived. due_by limits open to-dos to those due on or before a date.",
+     "description": "List to-dos. view: open (default) | done | archived. due_by limits open to-dos to those due on or before a date; "
+                    "active_on lists open to-dos that have started by that date (the daily list).",
      "input_schema": {"type": "object", "properties": {
-         "view": {"type": "string", "enum": ["open", "done", "archived"]}, "due_by": {"type": "string"}}}},
+         "view": {"type": "string", "enum": ["open", "done", "archived"]}, "due_by": {"type": "string"},
+         "active_on": {"type": "string"}}}},
     {"name": "add_todo",
      "description": "Add a to-do: something to remember or get done with no set time slot. Use create_item instead for anything at a specific time.",
      "input_schema": {"type": "object", "properties": {
-         "title": {"type": "string"}, "due": {"type": "string", "description": "optional YYYY-MM-DD"},
-         "priority": {"type": "integer", "enum": [1, 2], "description": "1 = flagged/high, 2 = normal"},
+         "title": {"type": "string"},
+         "start_date": {"type": "string", "description": "YYYY-MM-DD it should start showing on the daily list; default today"},
+         "due": {"type": "string", "description": "optional YYYY-MM-DD deadline"},
+         "priority": {"type": "integer", "enum": [1, 2, 3, 4], "description": "1 high, 2 medium, 3 low, 4 none (default)"},
          "notes": {"type": "string"}}, "required": ["title"]}},
     {"name": "update_todo",
-     "description": "Change a to-do's title, due date (null to clear), priority or notes.",
+     "description": "Change a to-do's title, start date, due date (null to clear), priority (1 high .. 4 none) or notes.",
      "input_schema": {"type": "object", "properties": {
-         "id": {"type": "integer"}, "title": {"type": "string"}, "due": {"type": ["string", "null"]},
-         "priority": {"type": "integer", "enum": [1, 2]}, "notes": {"type": "string"}}, "required": ["id"]}},
+         "id": {"type": "integer"}, "title": {"type": "string"}, "start_date": {"type": "string"},
+         "due": {"type": ["string", "null"]}, "priority": {"type": "integer", "enum": [1, 2, 3, 4]},
+         "notes": {"type": "string"}}, "required": ["id"]}},
     {"name": "complete_todo",
      "description": "Close a to-do, optionally with a closing comment (e.g. what was done).",
      "input_schema": {"type": "object", "properties": {
