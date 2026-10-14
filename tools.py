@@ -229,6 +229,11 @@ REGISTRY = {f.__name__: f for f in (list_items, create_item, update_item, delete
                                      plan_week, get_education_plan, add_milestone, complete_milestone)}
 WRITES = {"create_item", "update_item", "delete_item", "add_milestone", "complete_milestone"}
 
+import todos as _todos  # noqa: E402  (to-do list tools share the same gateway)
+TOOLS += _todos.TOOLS
+REGISTRY.update(_todos.FUNCS)
+WRITES |= _todos.WRITES
+
 
 def execute(name, args):
     """Run a tool. Returns (result_dict, is_error)."""
@@ -237,7 +242,7 @@ def execute(name, args):
         return {"error": f"unknown tool {name}"}, True
     try:
         return fn(**args), False
-    except (ToolError, ValueError, TypeError) as e:
+    except (ToolError, ValueError, TypeError, _todos.TodoError) as e:
         db.session.rollback()
         return {"error": str(e)}, True
 

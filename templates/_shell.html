@@ -14,6 +14,7 @@
     <div class="tabs" role="tablist">
       <button role="tab" data-view="day" aria-selected="true">Today</button>
       <button role="tab" data-view="week" aria-selected="false">Week</button>
+      <button role="tab" data-view="todo" aria-selected="false">To-do</button>
       <button role="tab" data-view="plan" aria-selected="false">Plan</button>
     </div>
   </header>
@@ -22,6 +23,7 @@
 
 <div class="dock">
   <div class="dock-inner">
+    <div class="snack" id="snack" role="status" hidden></div>
     <div class="chat-log" id="chat-log" aria-live="polite"></div>
     <div class="suggest" id="suggest">
       <button>Plan my study for this week</button>

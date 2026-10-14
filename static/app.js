@@ -43,10 +43,12 @@
 
   async function render() {
     document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.view === state.view)));
+    $(".nav-arrows").hidden = !(state.view === "day" || state.view === "week");
     try { localStorage.setItem("planner.view", state.view); } catch (e) { /* ignore */ }
     if (!state.courses.length) state.courses = await api("GET", "/api/courses");
     if (state.view === "day") return renderDay();
     if (state.view === "week") return renderWeek();
+    if (state.view === "todo") return renderTodo();
     return renderPlan();
   }
 
@@ -65,7 +67,8 @@
     const d = state.cursor, key = iso(d);
     const isToday = key === iso(new Date());
     setHeader(isToday ? "Today" : DAYS[(d.getDay() + 6) % 7] + " " + fmtShort(d), fmtLong(d));
-    const data = await api("GET", `/api/day/${key}`);
+    const [data, todoData] = await Promise.all([api("GET", `/api/day/${key}`),
+      isToday ? api("GET", `/api/todos?view=open&due_by=${key}`) : Promise.resolve(null)]);
     const timed = data.items.filter((i) => i.start);
     const untimed = [...data.overdue, ...data.items.filter((i) => !i.start)];
 
@@ -82,6 +85,8 @@
     view.innerHTML = `${offBanner}
       <section><h2>Top 3 ${badge}</h2><ol class="prio-list">${prio}</ol></section>
       <section><h2>Timeline</h2>${timeline(timed, data.fixed, isToday, key)}</section>
+      ${todoData ? `<section><h2>To-do <button class="link" data-goto="todo">${todoData.counts.open} open ›</button></h2>${
+        todoData.todos.length ? `<ul class="rows todo-list">${todoData.todos.map(todoRow).join("")}</ul>` : `<div class="empty">Nothing due today.</div>`}</section>` : ""}
       <section><h2>Tasks & deadlines</h2>${rows(untimed)}</section>
       <section><h2>Free time</h2><div class="free-chips">${
         data.free.length ? data.free.map((f) => `<span>${f.start}–${f.end} · ${f.minutes}m</span>`).join("") : `<div class="empty">No gaps left today.</div>`
@@ -212,6 +217,153 @@
       <section><h2>Study windows & other fixed time</h2><div class="fixed-list">${fixed}</div></section>`;
   }
 
+  // ---------------------------------------------------------------- to-do list
+  const TODO_VIEWS = [["open", "Open"], ["done", "Done"], ["archived", "Archive"]];
+  function dueChip(t) {
+    if (!t.due) return "";
+    const n = daysUntil(t.due);
+    const txt = n === 0 ? "Today" : n === 1 ? "Tomorrow" : n === -1 ? "Yesterday" : n < 0 ? `${-n}d overdue` : fmtShort(parseD(t.due));
+    return `<span class="chip ${n < 0 ? "overdue" : n === 0 ? "today" : ""}">${txt}</span>`;
+  }
+  function todoRow(t) {
+    if (t.status === "open") return `
+      <li class="row todo ${t.priority === 1 ? "flagged" : ""}">
+        <button class="check" data-tdone="${t.id}" aria-label="Close “${esc(t.title)}”"></button>
+        <button class="t" data-tedit="${t.id}"><strong>${t.priority === 1 ? '<span class="flag" aria-label="flagged">⚑</span> ' : ""}${esc(t.title)}</strong>${
+          t.notes ? `<span>${esc(t.notes.slice(0, 80))}</span>` : ""}</button>
+        ${dueChip(t)}
+      </li>`;
+    const closed = t.done_at ? fmtShort(parseD(t.done_at)) : "";
+    const meta = t.archived_at ? `Closed ${closed} · archived ${fmtShort(parseD(t.archived_at))}`
+      : `Closed ${closed}${t.archives_on ? ` · archives ${fmtShort(parseD(t.archives_on))}` : ""}`;
+    return `
+      <li class="row todo is-done">
+        <button class="check done" data-treopen="${t.id}" aria-label="Reopen “${esc(t.title)}”">✓</button>
+        <div class="t"><strong>${esc(t.title)}</strong><span>${meta}</span>${t.done_comment ? `<em class="comment">“${esc(t.done_comment)}”</em>` : ""}</div>
+        <div class="todo-actions">${t.archived_at
+          ? `<button class="mini" data-tunarch="${t.id}">Restore</button><button class="mini danger" data-tdel="${t.id}">Delete</button>`
+          : `<button class="mini" data-tcomment="${t.id}">${t.done_comment ? "Edit note" : "Comment"}</button><button class="mini" data-tarch="${t.id}">Archive</button>`}</div>
+      </li>`;
+  }
+
+  async function renderTodo() {
+    const v = state.todoView || "open";
+    const data = await api("GET", `/api/todos?view=${v}`);
+    state.todos = data.todos;
+    setHeader("To-do", `${data.counts.open} open · closed items archive after ${data.archive_after_days} days`);
+    const seg = TODO_VIEWS.map(([k, l]) => `<button data-tview="${k}" aria-pressed="${k === v}">${l} <b>${data.counts[k]}</b></button>`).join("");
+    const empty = { open: "All clear. Add something above, or tell Claude “remind me to…”.", done: "Nothing closed in the last few days.", archived: "The archive is empty." }[v];
+    view.innerHTML = `
+      <section>
+        <form class="todo-add" id="todo-add" autocomplete="off">
+          <input id="todo-new" placeholder="Add a to-do…" aria-label="New to-do" maxlength="300">
+          <div class="todo-add-row">
+            <label class="todo-due">Due <input type="date" id="todo-due" aria-label="Due date (optional)"></label>
+            <button type="button" class="mini" id="todo-flag" aria-pressed="false">⚑ Flag</button>
+            <button class="btn primary" type="submit">Add</button>
+          </div>
+        </form>
+      </section>
+      <div class="seg" role="tablist">${seg}</div>
+      <section>${data.todos.length ? `<ul class="rows todo-list">${data.todos.map(todoRow).join("")}</ul>` : `<div class="empty">${empty}</div>`}</section>`;
+    $("#todo-flag").onclick = (e) => { const b = e.currentTarget; b.setAttribute("aria-pressed", String(b.getAttribute("aria-pressed") !== "true")); };
+    $("#todo-add").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const title = $("#todo-new").value.trim(); if (!title) return $("#todo-new").focus();
+      await api("POST", "/api/todos", { title, due: $("#todo-due").value || null, priority: $("#todo-flag").getAttribute("aria-pressed") === "true" ? 1 : 2 });
+      state.todoView = "open"; await render(); $("#todo-new").focus();
+    });
+  }
+
+  async function findTodo(id) {
+    const hit = (state.todos || []).find((t) => t.id === id);
+    if (hit) return hit;
+    for (const v of ["open", "done", "archived"]) {
+      const d = await api("GET", `/api/todos?view=${v}`); const t = d.todos.find((x) => x.id === id); if (t) return t;
+    }
+  }
+
+  async function todoClick(e) {
+    const t = e.target.closest("[data-tdone],[data-treopen],[data-tedit],[data-tcomment],[data-tarch],[data-tunarch],[data-tdel],[data-tview],[data-goto]");
+    if (!t) return false;
+    const id = Number(t.dataset.tdone || t.dataset.treopen || t.dataset.tedit || t.dataset.tcomment || t.dataset.tarch || t.dataset.tunarch || t.dataset.tdel);
+    if (t.dataset.goto) { state.view = t.dataset.goto; state.todoView = "open"; await render(); return true; }
+    if (t.dataset.tview) { state.todoView = t.dataset.tview; await render(); return true; }
+    if (t.dataset.tdone) {
+      const done = await api("PATCH", `/api/todos/${id}`, { action: "complete" });
+      await render();
+      snack(`Closed “${done.title}”`, [
+        ["Add comment", () => openCommentSheet(done)],
+        ["Undo", async () => { await api("PATCH", `/api/todos/${id}`, { action: "reopen" }); render(); }],
+      ]);
+      return true;
+    }
+    if (t.dataset.treopen) { await api("PATCH", `/api/todos/${id}`, { action: "reopen" }); await render(); snack("Reopened"); return true; }
+    if (t.dataset.tarch) { await api("PATCH", `/api/todos/${id}`, { action: "archive" }); await render(); return true; }
+    if (t.dataset.tunarch) { await api("PATCH", `/api/todos/${id}`, { action: "unarchive" }); await render(); snack("Restored to Done"); return true; }
+    if (t.dataset.tcomment) { openCommentSheet(await findTodo(id)); return true; }
+    if (t.dataset.tdel) { await deleteTodo(id); return true; }
+    if (t.dataset.tedit) { openTodoSheet(await findTodo(id)); return true; }
+    return false;
+  }
+
+  async function deleteTodo(id) {
+    const res = await api("DELETE", `/api/todos/${id}`);
+    closeSheet(); await render();
+    snack(`Deleted “${res.deleted.title}”`, [["Undo", async () => { await api("POST", "/api/todos", { restore: res.deleted }); render(); }]]);
+  }
+
+  function openCommentSheet(t) {
+    sheet.innerHTML = `<form class="sheet" id="comment-form">
+      <h3>Closing note</h3>
+      <div class="sheet-sub">${esc(t.title)}</div>
+      <label class="field">What happened? (optional)<textarea id="f-comment" rows="3" maxlength="2000">${esc(t.done_comment || "")}</textarea></label>
+      <div class="btn-row"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" data-close>Cancel</button></div>
+    </form>`;
+    sheet.hidden = false; $("#f-comment").focus();
+    $("#comment-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      await api("PATCH", `/api/todos/${t.id}`, { action: "complete", comment: $("#f-comment").value });
+      closeSheet(); render();
+    });
+  }
+
+  function openTodoSheet(t) {
+    sheet.innerHTML = `<form class="sheet" id="todo-form">
+      <h3>Edit to-do</h3>
+      <label class="field">Title<input id="ft-title" required maxlength="300" value="${esc(t.title)}"></label>
+      <div class="grid2">
+        <label class="field">Due<input type="date" id="ft-due" value="${t.due || ""}"></label>
+        <label class="field">Priority<select id="ft-priority"><option value="2" ${t.priority !== 1 ? "selected" : ""}>Normal</option><option value="1" ${t.priority === 1 ? "selected" : ""}>⚑ Flagged</option></select></label>
+      </div>
+      <label class="field">Notes<textarea id="ft-notes" rows="3">${esc(t.notes || "")}</textarea></label>
+      <div class="btn-row"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" data-close>Cancel</button>
+        <button class="btn" type="button" id="ft-close">Close with note…</button><button class="btn danger" type="button" id="ft-del">Delete</button></div>
+    </form>`;
+    sheet.hidden = false; $("#ft-title").focus();
+    $("#todo-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      await api("PATCH", `/api/todos/${t.id}`, { title: $("#ft-title").value, due: $("#ft-due").value || null,
+        priority: Number($("#ft-priority").value), notes: $("#ft-notes").value });
+      closeSheet(); render();
+    });
+    $("#ft-close").onclick = () => openCommentSheet(t);
+    $("#ft-del").onclick = () => deleteTodo(t.id);
+  }
+
+  // snackbar: short message with optional actions (Undo, Add comment)
+  let snackTimer = null;
+  function snack(text, actions = [], ms = 7000) {
+    const el = $("#snack");
+    el.innerHTML = `<span>${esc(text)}</span>${actions.map(([l], i) => `<button data-snack="${i}">${esc(l)}</button>`).join("")}`;
+    el.hidden = false;
+    el.onclick = async (e) => {
+      const b = e.target.closest("button[data-snack]"); if (!b) return;
+      el.hidden = true; clearTimeout(snackTimer); await actions[Number(b.dataset.snack)][1]();
+    };
+    clearTimeout(snackTimer); snackTimer = setTimeout(() => { el.hidden = true; }, ms);
+  }
+
   // ---------------------------------------------------------------- item sheet
   const sheet = $("#sheet");
   const KINDS = ["task", "event", "class", "study", "deadline"];
@@ -272,6 +424,7 @@
   }
 
   view.addEventListener("click", async (e) => {
+    if (await todoClick(e)) return;
     const t = e.target.closest("[data-toggle],[data-edit],[data-target],[data-ms],#plan-week,#apply-plan,#discard-plan");
     if (!t) return;
     if (t.dataset.toggle) {
@@ -329,7 +482,7 @@
   $("#suggest").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) send(b.textContent); });
 
   // ---------------------------------------------------------------- demo backend
-  const Demo = (() => {
+  const Demo = !DEMO ? null : (() => {
     const today = parseD(iso(new Date()));
     const at = (n, h, m = 0) => { const d = addDays(today, n); d.setHours(h, m); return isoDT(d); };
     const SEED = window.PLANNER_SEED;
@@ -503,11 +656,49 @@
       return { reply: "This demo understands: \"add <thing> <day> <time>\", \"move <item> to <day> <time>\", \"plan my study\" and \"what's due\". The real app sends every message to Claude.", changes: [] };
     }
 
+    let todoId = 100;
+    const nowIso = () => isoDT(new Date());
+    const todos = [
+      { id: 1, title: "Email CS210 lecturer about assignment 1 (example)", due: iso(today), priority: 1 },
+      { id: 2, title: "Book NCT (example)", due: iso(addDays(today, -2)), priority: 2 },
+      { id: 3, title: "Buy USB-C hub for lab (example)", due: null, priority: 2 },
+      { id: 4, title: "Print CityWise worksheets (example)", due: iso(addDays(today, 3)), priority: 2 },
+      { id: 5, title: "Renew library books (example)", status: "done", done_at: isoDT(addDays(today, -1)), done_comment: "Renewed online until 5 Nov" },
+    ].map((t) => ({ notes: "", position: t.id, status: "open", done_at: null, done_comment: "", archived_at: null, created: nowIso(), priority: 2, due: null, ...t }));
+    const tdict = (t) => ({ ...t, archives_on: t.status === "done" && !t.archived_at && t.done_at ? iso(addDays(parseD(t.done_at), 3)) : null });
+    function demoTodos(method, p, q, b) {
+      const m = p.match(/^\/api\/todos\/(\d+)$/); const t = m && todos.find((x) => x.id === Number(m[1]));
+      if (method === "GET") {
+        const v = q.get("view") || "open", dueBy = q.get("due_by");
+        let list = todos.filter((x) => v === "open" ? x.status === "open" : v === "done" ? x.status === "done" && !x.archived_at : !!x.archived_at);
+        if (v === "open" && dueBy) list = list.filter((x) => x.due && x.due <= dueBy);
+        list.sort((a, c) => v === "open" ? (a.priority - c.priority) || String(a.due || "9").localeCompare(String(c.due || "9")) : String(c.done_at).localeCompare(String(a.done_at)));
+        return { todos: list.map(tdict), archive_after_days: 3, counts: {
+          open: todos.filter((x) => x.status === "open").length, done: todos.filter((x) => x.status === "done" && !x.archived_at).length,
+          archived: todos.filter((x) => x.archived_at).length } };
+      }
+      if (method === "POST") {
+        const n = b.restore ? { ...b.restore } : { title: b.title, due: b.due || null, priority: b.priority === 1 ? 1 : 2, notes: b.notes || "",
+          status: "open", done_at: null, done_comment: "", archived_at: null, created: nowIso() };
+        n.id = todoId++; todos.push(n); return tdict(n);
+      }
+      if (method === "DELETE") { todos.splice(todos.indexOf(t), 1); return { deleted: tdict(t) }; }
+      if (method === "PATCH") {
+        if (b.action === "complete") { t.status = "done"; t.done_at = t.done_at || nowIso(); if (b.comment != null) t.done_comment = b.comment; t.archived_at = null; }
+        else if (b.action === "reopen") Object.assign(t, { status: "open", done_at: null, done_comment: "", archived_at: null });
+        else if (b.action === "archive") t.archived_at = nowIso();
+        else if (b.action === "unarchive") { t.archived_at = null; t.done_at = nowIso(); }
+        else ["title", "due", "priority", "notes"].forEach((k) => { if (k in b) t[k] = b[k]; });
+        return tdict(t);
+      }
+    }
+
     function handle(method, path, body) {
       const [p] = path.split("?"); const q = new URLSearchParams(path.split("?")[1] || "");
       let m;
       const ok = (x) => Promise.resolve(JSON.parse(JSON.stringify(x)));
       try {
+        if (p.startsWith("/api/todos")) return ok(demoTodos(method, p, q, body));
         if (method === "GET" && p === "/api/courses") return ok(courses);
         if (method === "GET" && p === "/api/constraints") return ok(constraints);
         if (method === "GET" && p === "/api/items") return ok(listItems(q.get("from"), q.get("to")));

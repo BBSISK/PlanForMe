@@ -1,5 +1,5 @@
 """SQLAlchemy models. Times are naive local (Europe/Dublin) — see ARCHITECTURE.md §3."""
-from datetime import datetime, date, time
+from datetime import datetime, date, time, timedelta
 
 from flask_sqlalchemy import SQLAlchemy
 
@@ -199,3 +199,28 @@ def _iso(v):
     if isinstance(v, (date, time)):
         return v.isoformat()
     return v
+
+
+class Todo(db.Model):
+    """A to-do: no time slot. open -> done (optional comment) -> archived a few days later."""
+    __tablename__ = "todos"
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(300), nullable=False)
+    notes = db.Column(db.Text, default="")
+    due = db.Column(db.Date)
+    priority = db.Column(db.Integer, default=2)  # 1 = flagged, 2 = normal
+    position = db.Column(db.Integer, default=0)
+    status = db.Column(db.String(10), default="open")  # open | done
+    done_at = db.Column(db.DateTime)
+    done_comment = db.Column(db.Text, default="")
+    archived_at = db.Column(db.DateTime)
+    created = db.Column(db.DateTime, default=datetime.now)
+
+    def to_dict(self, archive_days=3):
+        archives_on = None
+        if self.status == "done" and self.done_at and not self.archived_at:
+            archives_on = (self.done_at + timedelta(days=archive_days)).date().isoformat()
+        return {"id": self.id, "title": self.title, "notes": self.notes or "", "due": _iso(self.due),
+                "priority": self.priority, "position": self.position, "status": self.status,
+                "done_at": _iso(self.done_at), "done_comment": self.done_comment or "",
+                "archived_at": _iso(self.archived_at), "archives_on": archives_on, "created": _iso(self.created)}

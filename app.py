@@ -48,6 +48,8 @@ def create_app(test_config=None):
         return {"asset_v": app.config["ASSET_VERSION"]}
 
     register_routes(app)
+    import todos
+    todos.register(app, login_required)
     return app
 
 

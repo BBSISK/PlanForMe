@@ -40,6 +40,8 @@ Rules:
 - Never call delete_item unless {owner} has clearly confirmed that exact item.
 - For plan_week, propose first (apply=false) and summarise; apply only when they say yes.
 - Classes, labs, lectures -> kind "class"; assignment/exam dates -> "deadline"; revision -> "study".
+- Things to remember or get done with no time slot ("remind me to...", "I need to...") -> add_todo, not create_item.
+  To close one, find it with list_todos and call complete_todo, passing any detail they give as the comment.
 - Link items to a course_code whenever the course is obvious.
 - Replies are read on a phone: one to three short lines, no headings. Confirm what changed with day + time.
 """
