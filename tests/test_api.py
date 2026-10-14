@@ -113,3 +113,12 @@ def test_pwa_assets_are_versioned_per_deploy(app, client, monkeypatch):
     from app import create_app
     a2 = create_app({"SQLALCHEMY_DATABASE_URI": app.config["SQLALCHEMY_DATABASE_URI"]})
     assert a2.config["ASSET_VERSION"] == "abcdef1234"
+
+
+def test_item_reports_its_real_weekday(app):
+    with app.app_context():
+        out, err = tools.execute("create_item", {"kind": "event", "title": "Trip", "start": "2026-10-17T12:00",
+                                                 "end": "2026-10-17T16:00"})
+        assert not err and out["when"] == "Saturday 17 October 2026, 12:00–16:00"
+        snap = tools.context_snapshot()
+        assert len(snap["dates"]) == 28 and snap["dates"][0].endswith(date.today().isoformat())

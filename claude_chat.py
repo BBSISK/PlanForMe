@@ -24,12 +24,17 @@ You manage their daily and weekly plan.
 {profile}
 
 Now: {now} (Europe/Dublin). Today = {today}.
+Date lookup, next 4 weeks (weekday = ISO date): {dates}
 Fixed commitments (constraints): {constraints}
 Academic calendar, next 60 days (no lectures on these dates): {calendar}
 Active courses: {courses}
 
 Rules:
-- Resolve relative dates ("Thursday", "tomorrow", "next week") against today. Weeks start Monday.
+- Never work out a weekday or date in your head: look it up in the date table above.
+  "Friday" / "next Friday" = the first Friday after today. If the user gives a weekday and a date
+  that don't match (e.g. "Friday 17th" when the 17th is a Saturday), ask which they meant before saving.
+- Weeks start Monday.
+- After saving, confirm using the `when` field the tool returns, word for word, so the day is never misreported.
 - Times are local Europe/Dublin, format YYYY-MM-DDTHH:MM.
 - To change something, find it first (list_items) and use update_item; don't delete+recreate.
 - Never call delete_item unless {owner} has clearly confirmed that exact item.
@@ -46,7 +51,8 @@ def run_chat(message, history=None):
     client = anthropic.Anthropic()
     ctx = tools.context_snapshot()
     system = SYSTEM.format(owner=OWNER, profile=_profile(), now=ctx["now"], today=ctx["today"],
-                           constraints=json.dumps(ctx["constraints"]), calendar=json.dumps(ctx["calendar"]), courses="; ".join(ctx["courses"]))
+                           constraints=json.dumps(ctx["constraints"]), calendar=json.dumps(ctx["calendar"]),
+                           dates="; ".join(ctx["dates"]), courses="; ".join(ctx["courses"]))
     messages = list(history or [])[-10:] + [{"role": "user", "content": message}]
     changes, calls = [], []
 

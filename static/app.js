@@ -310,7 +310,10 @@
     const pending = bubble("ai", "…");
     try {
       const res = await api("POST", "/api/chat", { message: text, history: state.history });
-      const chg = res.changes && res.changes.length ? `<span class="chg">${res.changes.length} change${res.changes.length > 1 ? "s" : ""} saved</span>` : "";
+      const changed = (res.changes || []).map((c) => c.result || {}).find((r) => r.start || r.due);
+      const jumpDay = changed ? (changed.start || changed.due).slice(0, 10) : null;
+      const chg = res.changes && res.changes.length ? `<span class="chg">${res.changes.length} change${res.changes.length > 1 ? "s" : ""} saved${
+        jumpDay ? ` · <button class="jump" data-day="${jumpDay}">Show ${esc(DAYS[(parseD(jumpDay).getDay() + 6) % 7])} ${fmtShort(parseD(jumpDay))}</button>` : ""}</span>` : "";
       pending.innerHTML = esc(res.reply).replace(/\n/g, "<br>") + chg;
       state.history.push({ role: "user", content: text }, { role: "assistant", content: res.reply });
       state.history = state.history.slice(-10);
@@ -319,6 +322,10 @@
     } catch (e) { pending.textContent = `Couldn't reach Claude: ${e.message}`; }
   }
   $("#chat-form").addEventListener("submit", (e) => { e.preventDefault(); const i = $("#chat-input"); send(i.value); i.value = ""; });
+  log.addEventListener("click", (e) => {
+    const b = e.target.closest("button.jump"); if (!b) return;
+    state.cursor = parseD(b.dataset.day); state.view = "day"; render();
+  });
   $("#suggest").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) send(b.textContent); });
 
   // ---------------------------------------------------------------- demo backend

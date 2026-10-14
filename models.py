@@ -158,6 +158,18 @@ class Item(db.Model):
     def day(self):
         return self.start.date() if self.start else self.due
 
+    def when(self):
+        """Human-readable day and time, e.g. 'Friday 16 October 2026, 12:00–16:00'. Claude quotes this back."""
+        d = self.day()
+        if not d:
+            return ""
+        label = f"{d:%A} {d.day} {d:%B %Y}"
+        if self.start:
+            label += f", {self.start:%H:%M}" + (f"–{self.end:%H:%M}" if self.end else "")
+        else:
+            label += " (no set time)"
+        return label
+
     def to_dict(self):
         return {
             "id": self.id, "kind": self.kind, "title": self.title, "notes": self.notes,
@@ -166,7 +178,7 @@ class Item(db.Model):
             "course_id": self.course_id,
             "course_code": self.course.code if self.course else None,
             "colour": self.course.colour if self.course else None,
-            "goal_id": self.goal_id, "source": self.source, "locked": self.locked,
+            "goal_id": self.goal_id, "source": self.source, "locked": self.locked, "when": self.when(),
         }
 
 

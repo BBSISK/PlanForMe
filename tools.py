@@ -255,5 +255,6 @@ def context_snapshot():
     cal = [c.to_dict() for c in CalendarDay.query.filter(CalendarDay.end >= today,
                                                           CalendarDay.start <= today + timedelta(days=60))
            .order_by(CalendarDay.start)]
+    dates = [f"{d:%a} {d.day} {d:%b} = {d.isoformat()}" for d in (today + timedelta(days=n) for n in range(28))]
     return {"now": now.strftime("%A %d %B %Y, %H:%M"), "today": today.isoformat(),
-            "constraints": cons, "courses": courses, "calendar": cal}
+            "constraints": cons, "courses": courses, "calendar": cal, "dates": dates}
