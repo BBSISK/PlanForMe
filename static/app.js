@@ -199,7 +199,7 @@
       return `<div class="tt-day"><b>${DAYS[d]}</b><div>${cl.map((c) => `<div class="tt-row ${c.note.startsWith("CHECK") ? "check-me" : ""}" style="--c:${c.colour}">
         <time>${c.start_time}–${c.end_time}</time><code>${esc(c.label)}</code><span>${esc(c.room)}${c.note ? ` · ${esc(c.note)}` : ""}</span></div>`).join("")}</div></div>`;
     }).join("");
-    const fixed = cons.filter((c) => c.kind !== "class").map((c) => `<div><span>${esc(c.label)}${c.kind === "preferred_study" ? " (study window)" : ""}</span>
+    const fixed = cons.filter((c) => c.kind !== "class").map((c) => `<div><span>${esc(c.label)}${c.kind === "preferred_study" ? " (study window)" : ""}${c.term_only ? " (term time)" : ""}</span>
       <span>${c.weekdays.map((w) => DAYS[w]).join(" ")} · ${c.start_time}–${c.end_time}</span></div>`).join("");
 
     view.innerHTML = `
@@ -334,14 +334,17 @@
       ...SEED.timetable.map((t) => ({ id: cn++, label: t.code, weekdays: [t.weekday], start_time: t.start, end_time: t.end, kind: "class",
         course_code: t.code, colour: colourOf(t.code), room: t.room || "", note: t.note || "" })),
       ...(SEED.study_windows || []).map((w) => ({ id: cn++, label: w.label, weekdays: w.weekdays, start_time: w.start, end_time: w.end, kind: "preferred_study", room: "", note: "" })),
-      ...(SEED.busy || []).map((w) => ({ id: cn++, label: w.label, weekdays: w.weekdays, start_time: w.start, end_time: w.end, kind: "busy", room: "", note: "" })),
+      ...(SEED.busy || []).map((w) => ({ id: cn++, label: w.label, weekdays: w.weekdays, start_time: w.start, end_time: w.end, kind: "busy",
+        room: w.room || "", note: "", term_only: !!w.term_only, valid_from: w.valid_from || null, valid_to: w.valid_to || null })),
     ];
     const CAL = SEED.calendar || [], TERM = SEED.term || {};
     const offsOn = (key) => CAL.filter((c) => c.start <= key && (c.end || c.start) >= key).map((c) => ({ ...c, end: c.end || c.start }));
     const activeOn = (c, key) => {
       const wd = (parseD(key).getDay() + 6) % 7;
       if (!c.weekdays.includes(wd)) return false;
-      if (c.kind === "class" && ((TERM.start && key < TERM.start) || (TERM.end && key > TERM.end) || offsOn(key).length)) return false;
+      if (c.kind === "class" && ((TERM.start && key < TERM.start) || (TERM.end && key > TERM.end))) return false;
+      if ((c.valid_from && key < c.valid_from) || (c.valid_to && key > c.valid_to)) return false;
+      if ((c.kind === "class" || c.term_only) && offsOn(key).length) return false;
       return true;
     };
     let mn = 1;

@@ -47,7 +47,10 @@ def seed():
     for kind, key in (("preferred_study", "study_windows"), ("busy", "busy")):
         for w in data.get(key, []):
             db.session.add(Constraint(label=w["label"], weekdays=_days(w["weekdays"]), kind=kind,
-                                      start_time=time.fromisoformat(w["start"]), end_time=time.fromisoformat(w["end"])))
+                                      start_time=time.fromisoformat(w["start"]), end_time=time.fromisoformat(w["end"]),
+                                      room=w.get("room", ""), term_only=bool(w.get("term_only")),
+                                      valid_from=date.fromisoformat(w["valid_from"]) if w.get("valid_from") else None,
+                                      valid_to=date.fromisoformat(w["valid_to"]) if w.get("valid_to") else None))
     for c in data.get("calendar", []):
         db.session.add(CalendarDay(start=date.fromisoformat(c["start"]), end=date.fromisoformat(c.get("end") or c["start"]),
                                    label=c["label"], kind=c.get("kind", "no_lectures")))

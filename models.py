@@ -67,6 +67,7 @@ class Constraint(db.Model):
     note = db.Column(db.String(200), default="")
     valid_from = db.Column(db.Date)   # e.g. first day of lectures; None = always
     valid_to = db.Column(db.Date)     # e.g. last day of lectures
+    term_only = db.Column(db.Boolean, default=False)  # like classes: skipped on holidays, study weeks, exams
 
     course = db.relationship("Course")
 
@@ -79,7 +80,7 @@ class Constraint(db.Model):
             return False
         if (self.valid_from and day < self.valid_from) or (self.valid_to and day > self.valid_to):
             return False
-        if self.kind == "class":
+        if self.kind == "class" or self.term_only:
             offs = day_offs(day) if offs is None else offs
             if offs:
                 return False
@@ -92,7 +93,8 @@ class Constraint(db.Model):
                 "course_code": self.course.code if self.course else None,
                 "colour": self.course.colour if self.course else None,
                 "room": self.room or "", "note": self.note or "",
-                "valid_from": _iso(self.valid_from), "valid_to": _iso(self.valid_to)}
+                "valid_from": _iso(self.valid_from), "valid_to": _iso(self.valid_to),
+                "term_only": bool(self.term_only)}
 
 
 BLOCKING = ("busy", "class")

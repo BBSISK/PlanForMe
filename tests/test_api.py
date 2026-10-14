@@ -83,3 +83,17 @@ def test_bank_holiday_cancels_classes_not_other_commitments(app):
 def test_study_blocks_can_be_30_minutes(app):
     import scheduler
     assert scheduler.BLOCK_MIN == timedelta(minutes=30)
+
+
+def test_term_only_commitment_skips_holidays(app):
+    from models import CalendarDay, Constraint, active_constraints
+    from datetime import time as t_
+    with app.app_context():
+        wed = monday() + timedelta(days=9)
+        db.session.add(Constraint(label="Volunteering", weekdays=str(wed.weekday()), kind="busy", term_only=True,
+                                  start_time=t_(18), end_time=t_(20)))
+        db.session.add(Constraint(label="Gym", weekdays=str(wed.weekday()), kind="busy", start_time=t_(7), end_time=t_(8)))
+        db.session.add(CalendarDay(start=wed, end=wed, label="Study week", kind="no_lectures"))
+        db.session.commit()
+        labels = {c.label for c in active_constraints(wed)}
+        assert "Volunteering" not in labels and "Gym" in labels
