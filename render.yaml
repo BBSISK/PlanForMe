@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: planner
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn "app:create_app()" --workers 2 --timeout 90
+    healthCheckPath: /healthz
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: TZ
+        value: Europe/Dublin
+      - key: SECRET_KEY
+        generateValue: true
+      - key: API_TOKEN
+        generateValue: true
+      - key: APP_PASSWORD
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false   # Neon or Render Postgres connection string
+      - key: OWNER_NAME
+        sync: false
+      - key: CLAUDE_MODEL
+        value: claude-sonnet-4-5

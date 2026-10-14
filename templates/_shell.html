@@ -1,0 +1,40 @@
+<div class="app">
+  <header class="top">
+    <div class="top-row">
+      <div>
+        <h1 class="date-title" id="title">Today</h1>
+        <div class="date-sub" id="subtitle"></div>
+      </div>
+      <div class="nav-arrows">
+        <button class="icon-btn" id="prev" aria-label="Previous">‹</button>
+        <button class="icon-btn" id="today-btn">Today</button>
+        <button class="icon-btn" id="next" aria-label="Next">›</button>
+      </div>
+    </div>
+    <div class="tabs" role="tablist">
+      <button role="tab" data-view="day" aria-selected="true">Today</button>
+      <button role="tab" data-view="week" aria-selected="false">Week</button>
+      <button role="tab" data-view="plan" aria-selected="false">Plan</button>
+    </div>
+  </header>
+  <main id="view"></main>
+</div>
+
+<div class="dock">
+  <div class="dock-inner">
+    <div class="chat-log" id="chat-log" aria-live="polite"></div>
+    <div class="suggest" id="suggest">
+      <button>Plan my study for this week</button>
+      <button>Add CS210 lab Thursday 7pm–9pm</button>
+      <button>What's due in the next 2 weeks?</button>
+      <button>Move tonight's study to tomorrow</button>
+    </div>
+    <form class="chat-form" id="chat-form" autocomplete="off">
+      <button type="button" class="add-btn" id="add-btn" aria-label="Add item">+</button>
+      <input id="chat-input" placeholder="Tell Claude… “gym Sat 10am”" aria-label="Message Claude">
+      <button class="send-btn" type="submit">Send</button>
+    </form>
+  </div>
+</div>
+
+<div class="sheet-wrap" id="sheet" hidden></div>

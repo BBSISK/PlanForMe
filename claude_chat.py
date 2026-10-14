@@ -1,0 +1,73 @@
+"""In-app chat: one user message -> Claude tool-use loop -> reply + list of changes."""
+import json
+import os
+from pathlib import Path
+
+from models import ChatLog, db
+import tools
+
+MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-5")
+MAX_TURNS = 8
+
+OWNER = os.environ.get("OWNER_NAME", "the user")
+PROFILE_FILE = Path(__file__).parent / "data" / "profile.local.txt"  # gitignored "about me" for Claude
+
+
+def _profile():
+    return PROFILE_FILE.read_text().strip() if PROFILE_FILE.exists() else ""
+
+
+SYSTEM = """You are the planning assistant inside {owner}'s personal planner app (phone PWA).
+You manage their daily and weekly plan.
+{profile}
+
+Now: {now} (Europe/Dublin). Today = {today}.
+Fixed commitments (constraints): {constraints}
+Active courses: {courses}
+
+Rules:
+- Resolve relative dates ("Thursday", "tomorrow", "next week") against today. Weeks start Monday.
+- Times are local Europe/Dublin, format YYYY-MM-DDTHH:MM.
+- To change something, find it first (list_items) and use update_item; don't delete+recreate.
+- Never call delete_item unless {owner} has clearly confirmed that exact item.
+- For plan_week, propose first (apply=false) and summarise; apply only when they say yes.
+- Classes, labs, lectures -> kind "class"; assignment/exam dates -> "deadline"; revision -> "study".
+- Link items to a course_code whenever the course is obvious.
+- Replies are read on a phone: one to three short lines, no headings. Confirm what changed with day + time.
+"""
+
+
+def run_chat(message, history=None):
+    import anthropic  # imported lazily so the app runs without the key in dev
+
+    client = anthropic.Anthropic()
+    ctx = tools.context_snapshot()
+    system = SYSTEM.format(owner=OWNER, profile=_profile(), now=ctx["now"], today=ctx["today"],
+                           constraints=json.dumps(ctx["constraints"]), courses="; ".join(ctx["courses"]))
+    messages = list(history or [])[-10:] + [{"role": "user", "content": message}]
+    changes, calls = [], []
+
+    for _ in range(MAX_TURNS):
+        resp = client.messages.create(model=MODEL, max_tokens=1024, system=system,
+                                      tools=tools.TOOLS, messages=messages)
+        messages.append({"role": "assistant", "content": [b.model_dump() for b in resp.content]})
+        if resp.stop_reason != "tool_use":
+            break
+        results = []
+        for block in resp.content:
+            if block.type != "tool_use":
+                continue
+            out, is_err = tools.execute(block.name, block.input)
+            calls.append({"tool": block.name, "input": block.input, "error": is_err})
+            if not is_err and (block.name in tools.WRITES or
+                               (block.name == "plan_week" and block.input.get("apply"))):
+                changes.append({"tool": block.name, "result": out})
+            results.append({"type": "tool_result", "tool_use_id": block.id,
+                            "content": json.dumps(out, default=str), "is_error": is_err})
+        messages.append({"role": "user", "content": results})
+
+    reply = "".join(b.text for b in resp.content if b.type == "text").strip() or "Done."
+    db.session.add(ChatLog(role="user", content=message))
+    db.session.add(ChatLog(role="assistant", content=reply, tool_calls=calls))
+    db.session.commit()
+    return {"reply": reply, "changes": changes}

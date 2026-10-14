@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en-IE">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Planner — sign in</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+  <main style="max-width:360px;margin:15vh auto 0">
+    <h1 class="date-title">Planner</h1>
+    <form method="post" class="sheet" style="border-radius:14px">
+      <label class="field">Password <input type="password" name="password" id="password" autofocus></label>
+      {% if error %}<div class="confirm">{{ error }}</div>{% endif %}
+      <button class="btn primary">Sign in</button>
+    </form>
+  </main>
+</body>
+</html>

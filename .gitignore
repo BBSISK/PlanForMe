@@ -1,0 +1,11 @@
+.env
+*.db
+instance/
+__pycache__/
+.pytest_cache/
+.venv/
+dist/
+# personal data never goes to GitHub
+data/*.local.json
+*.local.*
+.DS_Store
