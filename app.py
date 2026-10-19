@@ -29,6 +29,7 @@ def create_app(test_config=None):
         SESSION_COOKIE_SECURE=os.environ.get("FLASK_ENV") == "production",
         APP_PASSWORD=os.environ.get("APP_PASSWORD", ""),
         API_TOKEN=os.environ.get("API_TOKEN", ""),
+        MAX_CONTENT_LENGTH=8 * 1024 * 1024,  # pasted note images (resized in the browser first)
     )
     if test_config:
         app.config.update(test_config)

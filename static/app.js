@@ -376,6 +376,44 @@
   }
 
   // ---------------------------------------------------------------- lecture notes
+  // Images live in the note text as ![image](/api/notes/img/12); only our own image URLs are ever turned into <img>.
+  const IMG_RX = /!\[([^\]\n]*)\]\((\/api\/notes\/img\/\d+|blob:[^)\s]+)\)/g;
+  const noteImages = (t) => [...String(t || "").matchAll(IMG_RX)].map((m) => m[2]);
+  const withImages = (escaped) => escaped.replace(IMG_RX, (m, alt, url) => `<img class="note-img" src="${url}" alt="${alt}" loading="lazy" data-zoom="${url}">`);
+  const stripImages = (t) => String(t || "").replace(IMG_RX, "[image]");
+
+  // Shrink before upload: max 1600px on the long side, WebP/JPEG. Small PNG screenshots go up as they are.
+  async function shrinkImage(file) {
+    if (file.type === "image/gif" || (file.type === "image/png" && file.size < 400 * 1024)) return file;
+    try {
+      const bmp = await createImageBitmap(file);
+      const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+      const c = document.createElement("canvas"); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+      c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+      for (const type of ["image/webp", "image/jpeg"]) {
+        const blob = await new Promise((r) => c.toBlob(r, type, 0.85));
+        if (blob && blob.type === type) return blob.size < file.size ? blob : file;
+      }
+    } catch (e) { /* fall back to the original */ }
+    return file;
+  }
+  async function uploadImage(file, course) {
+    const blob = await shrinkImage(file);
+    if (DEMO) return { url: URL.createObjectURL(blob) };
+    const fd = new FormData();
+    fd.append("image", blob, file.name || "pasted." + (blob.type.split("/")[1] || "png"));
+    if (course) fd.append("course", course);
+    const r = await fetch("/api/notes/images", { method: "POST", body: fd, credentials: "same-origin" });
+    if (r.status === 401) { location.href = "/login"; return; }
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || "Upload failed");
+    return data;
+  }
+  function zoomImage(url) {
+    const z = document.createElement("div"); z.className = "img-zoom"; z.innerHTML = `<img src="${url}" alt="">`;
+    z.onclick = () => z.remove(); document.body.appendChild(z);
+  }
+  document.addEventListener("click", (e) => { const im = e.target.closest("[data-zoom]"); if (im) { e.preventDefault(); zoomImage(im.dataset.zoom); } });
   const lecKey = (l) => `${l.course_code}|${l.date}|${l.start}`;
   const nowHM = () => { const n = new Date(); return `${pad(n.getHours())}:${pad(n.getMinutes())}`; };
   const fmtLecDay = (s) => parseD(s).toLocaleDateString("en-IE", { weekday: "short", day: "numeric", month: "short" });
@@ -462,7 +500,7 @@
     if (!groups.length) { el.innerHTML = `<div class="empty">${state.topicQuery ? "No notes match that search." : "No notes yet. Add some from the Lectures list."}</div>`; return; }
     const q = (state.topicQuery || "").trim().toLowerCase();
     const snippet = (l) => {
-      const text = [l.note.body, l.note.follow_up].join("\n").replace(/\s+/g, " ").trim();
+      const text = stripImages([l.note.body, l.note.follow_up].join("\n")).replace(/\s+/g, " ").trim();
       if (!q) return esc(text.slice(0, 110));
       const i = text.toLowerCase().indexOf(q); if (i < 0) return esc(text.slice(0, 110));
       const a = Math.max(0, i - 40);
@@ -486,7 +524,7 @@
         <button class="icon-btn" data-rstep="${i + 1}" ${i < list.length - 1 ? "" : "disabled"} aria-label="Next entry">›</button></div>
       <h3>${esc(n.topic || lecTitle(l))}</h3>
       <div class="sheet-sub">${esc(lecTitle(l))} · ${fmtLong(parseD(l.date))} · ${l.start}${l.end ? "–" + l.end : ""}${l.room ? " · " + esc(l.room) : ""}</div>
-      ${n.body ? `<div class="reader-body">${esc(n.body)}</div>` : ""}
+      ${n.body ? `<div class="reader-body">${withImages(esc(n.body))}</div>` : ""}
       ${n.follow_up ? `<div class="reader-follow"><b>Follow up</b><div>${esc(n.follow_up)}</div></div>` : ""}
       <div class="btn-row"><button class="btn primary" type="button" id="r-edit">Edit</button><button class="btn" type="button" data-close>Close</button></div>
     </div>`;
@@ -515,7 +553,7 @@
 
   // tiny Markdown renderer for the compiled notes (headings, lists, bold; everything escaped first)
   function mdToHtml(md) {
-    const inline = (t) => esc(t).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+    const inline = (t) => withImages(esc(t)).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
     let html = "", list = null;
     const close = () => { if (list) { html += `</${list}>`; list = null; } };
     let para = [];
@@ -595,7 +633,9 @@
       <div class="sheet-sub">${esc(l.course_name)} · ${fmtLong(parseD(l.date))} · ${l.start}${l.end ? "–" + l.end : ""}${l.room ? " · " + esc(l.room) : ""}</div>
       ${prev && prev.note.topic ? `<div class="sheet-sub">Last time: ${esc(prev.note.topic)}</div>` : ""}
       <label class="field">Topic<input id="fl-topic" maxlength="200" placeholder="What's this lecture about?" value="${esc(v.topic)}"></label>
-      <label class="field">Notes<textarea id="fl-body" class="notes-body" placeholder="Key points, definitions, examples…">${esc(v.body)}</textarea></label>
+      <label class="field">Notes<textarea id="fl-body" class="notes-body" placeholder="Key points, definitions, examples… paste or drop images here">${esc(v.body)}</textarea></label>
+      <div class="img-row"><div class="img-strip" id="fl-imgs"></div>
+        <label class="mini img-add">+ Image<input type="file" id="fl-file" accept="image/*" multiple hidden></label></div>
       <label class="field">Follow up<textarea id="fl-follow" rows="2" placeholder="Questions to ask, things to revise">${esc(v.follow_up)}</textarea></label>
       <div class="btn-row" style="align-items:center"><button class="btn primary" type="submit">Done</button>
         <span class="save-state" id="fl-state">${draft ? "Unsaved draft restored" : n.updated ? "Saved" : ""}</span></div>
@@ -618,6 +658,44 @@
       try { localStorage.setItem(draftKey(k), JSON.stringify(body)); } catch (e) { /* ignore */ }
       $("#fl-state").textContent = "Typing…"; clearTimeout(noteTimer); noteTimer = setTimeout(save, 1200);
     });
+    // images: paste (screenshots), drop, or pick from the phone's camera roll
+    const ta = $("#fl-body");
+    const drawStrip = () => {
+      const urls = noteImages(ta.value);
+      $("#fl-imgs").innerHTML = urls.map((u, i) => `<button type="button" class="img-thumb" data-zoom="${u}" aria-label="Image ${i + 1}"><img src="${u}" alt=""></button>`).join("");
+    };
+    drawStrip();
+    ta.addEventListener("input", drawStrip);
+    async function addImages(files) {
+      files = [...files].filter((f) => f.type.startsWith("image/"));
+      for (const f of files) {
+        const tag = `![uploading ${Date.now()}…]`;
+        const at = ta.selectionStart ?? ta.value.length;
+        const before = ta.value.slice(0, at), lead = before && !before.endsWith("\n") ? "\n" : "";
+        ta.setRangeText(`${lead}${tag}\n`, at, ta.selectionEnd ?? at, "end");
+        $("#fl-state").textContent = "Uploading image…";
+        try {
+          const up = await uploadImage(f, l.course_code);
+          ta.value = ta.value.replace(tag, `![image](${up.url})`);
+        } catch (err) {
+          ta.value = ta.value.replace(tag + "\n", ""); snack(`Image not added: ${err.message}`);
+        }
+        ta.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    }
+    ta.addEventListener("paste", (e) => {
+      const files = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith("image/"));
+      const text = e.clipboardData?.getData("text/plain") || "";
+      if (!files.length || text.trim()) return;  // plain text (or text + picture from Word) pastes as text
+      e.preventDefault(); addImages(files);
+    });
+    ta.addEventListener("dragover", (e) => { if ([...e.dataTransfer.types].includes("Files")) e.preventDefault(); });
+    ta.addEventListener("drop", (e) => {
+      const files = [...(e.dataTransfer?.files || [])].filter((f) => f.type.startsWith("image/"));
+      if (!files.length) return;
+      e.preventDefault(); ta.focus(); addImages(files);
+    });
+    $("#fl-file").addEventListener("change", (e) => { addImages(e.target.files); e.target.value = ""; });
     $("#fl-body").addEventListener("keydown", (e) => {
       if (e.key !== "Tab" || e.shiftKey) return;
       e.preventDefault(); const ta = e.target, a = ta.selectionStart;

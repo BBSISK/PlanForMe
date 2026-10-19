@@ -112,6 +112,10 @@ Later: weighting by energy (mornings for hard modules), spaced repetition for re
   back) or "Week 5 · Lab" (a class slot whose note contains "lab"). Weeks with no lectures at all (study week) aren't counted.
 - Notes tab views: Lectures (newest first; add notes to any past lecture), Topics (grouped by topic, searchable,
   read entries one by one) and Semester (compiled).
+- Images: paste a screenshot, drop a file or tap "+ Image" in the notes box. The browser shrinks it (max 1600 px,
+  WebP/JPEG; small PNGs as-is), uploads to `POST /api/notes/images`, and the note text gets `![image](/api/notes/img/<id>)`.
+  Images are stored in Postgres (`note_images`, Render's disk doesn't persist), served with long private caching, and
+  shown as thumbnails under the box, inline in the reader and in Semester notes. PNG/JPEG/WebP/GIF only, 4 MB max.
 - Chat panel: drag the grip to resize, Hide / Clear; the page padding follows the dock's real height.
 - Notes are keyed on (course, date, start time), so nothing is created until something is typed. Extra lectures
   not on the timetable are allowed (pass a start time).

@@ -87,3 +87,18 @@ def test_study_week_not_counted(app, client):
         db.session.commit()
     lst = client.get("/api/notes/CS999").json["lectures"]
     assert [(x["date"], x["week"]) for x in lst] == [("2026-09-21", 1), ("2026-09-23", 1), ("2026-10-05", 2), ("2026-10-07", 2)]
+
+
+def test_image_upload_and_serve(app, client):
+    import io
+    _setup(app)
+    png = b"\x89PNG\r\n\x1a\n" + b"0" * 100
+    r = client.post("/api/notes/images", data={"course": "CS999", "image": (io.BytesIO(png), "shot.png", "image/png")},
+                    content_type="multipart/form-data")
+    assert r.status_code == 200 and r.json["url"].startswith("/api/notes/img/")
+    got = client.get(r.json["url"])
+    assert got.status_code == 200 and got.data == png and got.mimetype == "image/png"
+    bad = client.post("/api/notes/images", data={"image": (io.BytesIO(b"<svg/>"), "x.svg", "image/svg+xml")},
+                      content_type="multipart/form-data")
+    assert bad.status_code == 400
+    assert client.get("/api/notes/img/9999").status_code == 404

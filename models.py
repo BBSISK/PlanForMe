@@ -252,3 +252,15 @@ class LectureNote(db.Model):
                 "end": self.end_time.strftime("%H:%M") if self.end_time else None,
                 "topic": self.topic or "", "body": self.body or "", "follow_up": self.follow_up or "",
                 "updated": _iso(self.updated)}
+
+
+class NoteImage(db.Model):
+    """An image pasted into lecture notes. Stored in the database (Render's disk is wiped on each deploy);
+    the note body references it as ![image](/api/notes/img/<id>). Resized in the browser before upload."""
+    __tablename__ = "note_images"
+    id = db.Column(db.Integer, primary_key=True)
+    course_id = db.Column(db.Integer, db.ForeignKey("courses.id"))
+    mime = db.Column(db.String(40), nullable=False)
+    data = db.Column(db.LargeBinary, nullable=False)
+    size = db.Column(db.Integer, default=0)
+    created = db.Column(db.DateTime, default=datetime.now)

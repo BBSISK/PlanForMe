@@ -11,8 +11,10 @@ from datetime import date, datetime, time, timedelta
 
 from flask import Blueprint, jsonify, request
 
-from models import CalendarDay, Constraint, Course, LectureNote, db
+from models import CalendarDay, Constraint, Course, LectureNote, NoteImage, db
 
+IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
+MAX_IMAGE_BYTES = 4 * 1024 * 1024
 LEAD_MINUTES = 5        # the front end opens the notes sheet this long before a lecture starts
 FALLBACK_SPAN = 120     # days either side of today when a class has no term dates
 
@@ -257,6 +259,21 @@ def save_note(course_code, date=None, start=None, topic=None, body=None, follow_
     return _session_dict(course, s, note)
 
 
+def save_image(file, course_code=None):
+    mime = (file.mimetype or "").lower()
+    if mime not in IMAGE_TYPES:
+        raise NoteError("Only PNG, JPEG, WebP or GIF images can be added")
+    data = file.read(MAX_IMAGE_BYTES + 1)
+    if not data:
+        raise NoteError("That image was empty")
+    if len(data) > MAX_IMAGE_BYTES:
+        raise NoteError("That image is over 4 MB")
+    img = NoteImage(course_id=_course(course_code).id if course_code else None, mime=mime, data=data, size=len(data))
+    db.session.add(img)
+    db.session.commit()
+    return {"id": img.id, "url": f"/api/notes/img/{img.id}", "size": img.size}
+
+
 def delete_note(note_id):
     n = db.session.get(LectureNote, int(note_id))
     if not n:
@@ -340,6 +357,25 @@ def register(app, login_required):
         b = request.get_json(force=True) or {}
         return _run(save_note, code, b.get("date"), b.get("start"), b.get("topic"), b.get("body"),
                     b.get("follow_up"), b.get("append"))
+
+    @bp.post("/api/notes/images")
+    @login_required
+    def notes_image_upload():
+        f = request.files.get("image")
+        if not f:
+            return jsonify(error="No image in the upload"), 400
+        return _run(save_image, f, request.form.get("course"))
+
+    @bp.get("/api/notes/img/<int:iid>")
+    @login_required
+    def notes_image(iid):
+        img = db.session.get(NoteImage, iid)
+        if not img:
+            return jsonify(error="No such image"), 404
+        resp = app.response_class(img.data, mimetype=img.mime)
+        resp.headers["Cache-Control"] = "private, max-age=31536000, immutable"  # images never change
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        return resp
 
     @bp.delete("/api/notes/id/<int:nid>")
     @login_required
