@@ -165,7 +165,15 @@ section h2 { font: 600 .78rem/1 var(--font-body); text-transform: uppercase; let
   padding-left: max(12px, env(safe-area-inset-left, 0px)); padding-right: max(12px, env(safe-area-inset-right, 0px));
   padding-top: 10px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }
 .dock-inner { max-width: 720px; margin: 0 auto; display: grid; gap: 8px; }
-.chat-log { max-height: 38vh; overflow-y: auto; display: grid; gap: 6px; }
+.chat-log { max-height: var(--chat-h, 22vh); overflow-y: auto; display: grid; gap: 6px; align-content: start; overscroll-behavior: contain; }
+.chat-bar { display: grid; grid-template-columns: 1fr auto auto auto; align-items: center; gap: 6px; font: .72rem var(--font-mono); color: var(--muted); }
+.chat-bar[hidden] { display: none; }
+.chat-grip { grid-column: 1 / -1; grid-row: 1; justify-self: center; width: 100%; height: 14px; border: 0; background: none; cursor: ns-resize; touch-action: none; padding: 0; display: grid; place-items: center; }
+.chat-grip i { width: 44px; height: 5px; border-radius: 99px; background: var(--line); }
+.chat-grip:hover i, .chat-grip:focus-visible i { background: var(--muted); }
+#chat-count { grid-row: 2; }
+#chat-toggle, #chat-clear { grid-row: 2; }
+.dock.chat-hidden .chat-log { display: none; }
 .chat-log:empty { display: none; }
 .msg { padding: 8px 11px; border-radius: 12px; font-size: .88rem; max-width: 88%; overflow-wrap: anywhere; }
 .msg.me { justify-self: end; background: var(--accent); color: var(--surface); border-bottom-right-radius: 4px; }
@@ -317,3 +325,14 @@ section h2 .link { border: 0; background: none; padding: 0; font: 500 .78rem var
 .compiled ul, .compiled ol { margin: 6px 0; padding-left: 20px; }
 button.tl-block.class { cursor: pointer; }
 .tl-block .pen { font-size: .7rem; color: var(--muted); margin-left: 4px; }
+.topic-search { width: 100%; border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 9px 12px; font-size: 1rem; color: var(--ink); }
+.topic-group h2 .notes-stat { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.topic-group h2 { text-transform: none; letter-spacing: 0; font-size: .95rem; color: var(--ink); }
+.lec mark { background: color-mix(in srgb, var(--mark) 55%, transparent); color: inherit; border-radius: 3px; }
+.reader-nav { display: flex; justify-content: space-between; align-items: center; }
+.reader-nav .icon-btn[disabled] { opacity: .35; }
+.reader-body { white-space: pre-wrap; overflow-wrap: anywhere; font: .95rem/1.5 var(--font-body); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px; tab-size: 2; }
+.reader-follow { border-left: 3px solid var(--c, var(--accent)); padding: 4px 10px; font-size: .9rem; }
+.reader-follow b { display: block; font-size: .75rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 2px; }
+.reader-follow div { white-space: pre-wrap; }
+#topic-list { display: grid; gap: 18px; }

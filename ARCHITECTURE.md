@@ -108,6 +108,11 @@ Later: weighting by energy (mornings for hard modules), spaced repetition for re
 
 - A **lecture** = one course's timetabled `class` session on a date. Back-to-back slots for the same course merge
   into one lecture; days off (bank holidays, study weeks, exams) are skipped; lectures are numbered from term start.
+- Each lecture is labelled by teaching week: "Week 5 · Lecture 1", "Week 5 · Lectures 1–2" (two lecture slots back to
+  back) or "Week 5 · Lab" (a class slot whose note contains "lab"). Weeks with no lectures at all (study week) aren't counted.
+- Notes tab views: Lectures (newest first; add notes to any past lecture), Topics (grouped by topic, searchable,
+  read entries one by one) and Semester (compiled).
+- Chat panel: drag the grip to resize, Hide / Clear; the page padding follows the dock's real height.
 - Notes are keyed on (course, date, start time), so nothing is created until something is typed. Extra lectures
   not on the timetable are allowed (pass a start time).
 - **Notes tab**: pick a module → its lectures (newest first, current one highlighted) → tap to open the notes sheet

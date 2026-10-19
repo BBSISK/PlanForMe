@@ -25,6 +25,12 @@
 <div class="dock">
   <div class="dock-inner">
     <div class="snack" id="snack" role="status" hidden></div>
+    <div class="chat-bar" id="chat-bar" hidden>
+      <button type="button" class="chat-grip" id="chat-grip" aria-label="Drag to resize the conversation"><i></i></button>
+      <span id="chat-count"></span>
+      <button type="button" class="mini" id="chat-toggle" aria-expanded="true">Hide</button>
+      <button type="button" class="mini" id="chat-clear">Clear</button>
+    </div>
     <div class="chat-log" id="chat-log" aria-live="polite"></div>
     <div class="suggest" id="suggest">
       <button>Plan my study for this week</button>

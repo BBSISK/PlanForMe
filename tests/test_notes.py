@@ -11,8 +11,8 @@ def _setup(app):
         db.session.add(c)
         db.session.flush()
         mon = date(2026, 9, 21)  # a Monday
-        for wd, s, e in ((0, "09:00", "10:00"), (0, "10:00", "11:00"), (2, "14:00", "15:00")):
-            db.session.add(Constraint(label="CS999", kind="class", course_id=c.id, weekdays=str(wd), room="R1",
+        for wd, s, e, note in ((0, "09:00", "10:00", ""), (0, "10:00", "11:00", ""), (2, "14:00", "15:00", "lab")):
+            db.session.add(Constraint(label="CS999", kind="class", course_id=c.id, weekdays=str(wd), room="R1", note=note,
                                       start_time=time.fromisoformat(s), end_time=time.fromisoformat(e),
                                       valid_from=mon, valid_to=mon + timedelta(days=18)))
         db.session.add(CalendarDay(start=date(2026, 9, 30), end=date(2026, 9, 30), label="Off", kind="no_lectures"))
@@ -27,6 +27,8 @@ def test_sessions_merge_and_skip_days_off(app, client):
     assert got == [("2026-09-21", "09:00", "11:00", 1), ("2026-09-23", "14:00", "15:00", 2),
                    ("2026-09-28", "09:00", "11:00", 3), ("2026-10-05", "09:00", "11:00", 4),
                    ("2026-10-07", "14:00", "15:00", 5)]
+    labels = [x["label"] for x in data["lectures"]]
+    assert labels == ["Week 1 · Lectures 1–2", "Week 1 · Lab", "Week 2 · Lectures 1–2", "Week 3 · Lectures 1–2", "Week 3 · Lab"]
 
 
 def test_save_note_and_compile(app, client):
@@ -39,9 +41,9 @@ def test_save_note_and_compile(app, client):
     assert r.json["note"]["body"] == "O(n log n) for merge sort\nMaster theorem"
     client.put("/api/notes/CS999/lecture", json={"date": "2026-09-28", "topic": "Recursion", "body": "Base case first"})
     md = client.get("/api/notes/CS999/compiled").json["markdown"]
-    assert md.index("Lecture 1") < md.index("Lecture 3")
-    assert "Ask about amortised (L1, 21 Sep)" in md and "1. Big-O" in md and "Master theorem" in md
-    assert "Lecture 2 · Wed 23 Sep" in md  # listed under lectures with no notes yet
+    assert md.index("Week 1 · Lectures 1–2") < md.index("Week 2 · Lectures 1–2")
+    assert "Ask about amortised (W1 L1–2, 21 Sep)" in md and "1. Big-O" in md and "Master theorem" in md
+    assert "Week 1 · Lab · Wed 23 Sep" in md  # listed under lectures with no notes yet
     dl = client.get("/api/notes/CS999/compiled.md")
     assert dl.mimetype == "text/markdown" and "CS999-notes.md" in dl.headers["Content-Disposition"]
 
@@ -61,7 +63,7 @@ def test_lectures_on_day(app, client):
     _setup(app)
     day = client.get("/api/notes/today?date=2026-09-28").json
     mine = [x for x in day["lectures"] if x["course_code"] == "CS999"]
-    assert day["lead_minutes"] == 5 and len(mine) == 1 and mine[0]["number"] == 3 and mine[0]["start"] == "09:00"
+    assert day["lead_minutes"] == 5 and len(mine) == 1 and mine[0]["number"] == 3 and mine[0]["label"] == "Week 2 · Lectures 1–2" and mine[0]["start"] == "09:00"
 
 
 def test_claude_tools(app):
@@ -76,3 +78,12 @@ def test_claude_tools(app):
         out, err = tools.execute("save_lecture_note", {"course_code": "XX1"})
         assert err and "Unknown course" in out["error"]
         assert "save_lecture_note" in tools.WRITES
+
+
+def test_study_week_not_counted(app, client):
+    _setup(app)
+    with app.app_context():
+        db.session.add(CalendarDay(start=date(2026, 9, 28), end=date(2026, 10, 2), label="Study week", kind="no_lectures"))
+        db.session.commit()
+    lst = client.get("/api/notes/CS999").json["lectures"]
+    assert [(x["date"], x["week"]) for x in lst] == [("2026-09-21", 1), ("2026-09-23", 1), ("2026-10-05", 2), ("2026-10-07", 2)]

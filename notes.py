@@ -61,16 +61,60 @@ def _class_constraints(course_id=None):
     return q.order_by(Constraint.start_time).all()
 
 
+def _is_lab(c):
+    return "lab" in (c.note or "").lower()
+
+
 def _merge(blocks):
-    """[(start, end, room, constraint)] sorted by start -> merged back-to-back blocks."""
+    """[(start, end, room, constraint)] sorted by start -> merged back-to-back blocks of the same type.
+    Two 1-hour lecture slots in a row stay one session but count as two lectures (slots=2)."""
     out = []
     for s, e, room, c in blocks:
-        if out and out[-1]["end"] == s:
+        lab = _is_lab(c)
+        if out and out[-1]["end"] == s and out[-1]["lab"] == lab:
             out[-1]["end"] = e
+            out[-1]["slots"] += 1
             if room and room not in out[-1]["room"]:
                 out[-1]["room"] = f"{out[-1]['room']} / {room}" if out[-1]["room"] else room
         else:
-            out.append({"start": s, "end": e, "room": room or "", "note": c.note or ""})
+            out.append({"start": s, "end": e, "room": room or "", "note": c.note or "", "lab": lab, "slots": 1})
+    return out
+
+
+def _teaching_weeks(first, last, offs):
+    """Monday -> teaching week number. A week with no lectures at all (study week, exams) isn't counted."""
+    monday = first - timedelta(days=first.weekday())
+    weeks, n = {}, 0
+    while monday <= last:
+        if not all(offs.on(monday + timedelta(days=i)) for i in range(5)):
+            n += 1
+            weeks[monday] = n
+        monday += timedelta(days=7)
+    return weeks
+
+
+def _label_sessions(out, first, last, offs):
+    """Adds number (running count), week, part ('Lecture 1', 'Lectures 1–2', 'Lab'), label and short."""
+    weeks = _teaching_weeks(first, last, offs)
+    per_week = {}
+    for n, s in enumerate(out, 1):
+        s["number"] = n
+        monday = s["date"] - timedelta(days=s["date"].weekday())
+        w = weeks.get(monday)
+        s["week"] = w
+        if s["lab"]:
+            k = per_week.setdefault((monday, "lab"), [0])
+            k[0] += 1
+            s["part"], s["short_part"] = "Lab", "Lab"
+        else:
+            k = per_week.setdefault((monday, "lec"), [0])
+            a = k[0] + 1
+            k[0] += s["slots"]
+            b = k[0]
+            s["part"] = f"Lecture {a}" if a == b else f"Lectures {a}–{b}"
+            s["short_part"] = f"L{a}" if a == b else f"L{a}–{b}"
+        s["label"] = f"Week {w} · {s['part']}" if w else s["part"]
+        s["short"] = f"W{w} {s['short_part']}" if w else s["short_part"]
     return out
 
 
@@ -103,8 +147,7 @@ def sessions(course, frm=None, to=None):
     while day <= last:
         out.extend(_sessions_on(day, {course.id: cons}, offs))
         day += timedelta(days=1)
-    for n, s in enumerate(out, 1):
-        s["number"] = n
+    _label_sessions(out, first, last, offs)
     lo, hi = _d(frm) or date.min, _d(to) or date.max
     return [s for s in out if lo <= s["date"] <= hi]
 
@@ -118,6 +161,9 @@ def _session_dict(course, s, note):
             "date": s["date"].isoformat(), "start": s["start"].strftime("%H:%M"),
             "end": s["end"].strftime("%H:%M") if s.get("end") else None, "room": s.get("room", ""),
             "number": s.get("number"), "in_timetable": s.get("in_timetable", True),
+            "week": s.get("week"), "kind": "lab" if s.get("lab") else "lecture",
+            "part": s.get("part") or "Extra lecture", "label": s.get("label") or "Extra lecture",
+            "short": s.get("short") or "Extra",
             "note": note.to_dict() if note else None,
             "has_notes": bool(note and (note.topic or note.body or note.follow_up).strip())}
 
@@ -154,8 +200,9 @@ def lectures_on(day=None):
     out = []
     for s in found:
         course = courses[s["course_id"]]
-        num = next((x["number"] for x in sessions(course, day, day) if x["start"] == s["start"]), None)
-        s["number"] = num
+        full = next((x for x in sessions(course, day, day) if x["start"] == s["start"]), None)
+        if full:
+            s = full
         out.append(_session_dict(course, s, notes.get(_key(course.id, day, s["start"]))))
     out.sort(key=lambda x: x["start"])
     return {"date": day.isoformat(), "lead_minutes": LEAD_MINUTES, "lectures": out}
@@ -255,10 +302,9 @@ def compile_notes(course_code):
 
 def _label(x, short=False):
     d = _d(x["date"])
-    num = f"Lecture {x['number']}" if x.get("number") else "Extra lecture"
     if short:
-        return f"L{x['number']}, {d.day} {d:%b}" if x.get("number") else f"extra, {d.day} {d:%b}"
-    return f"{num} · {d:%a} {d.day} {d:%b} {x['start']}"
+        return f"{x.get('short') or 'Extra'}, {d.day} {d:%b}"
+    return f"{x.get('label') or 'Extra lecture'} · {d:%a} {d.day} {d:%b} {x['start']}"
 
 
 # ------------------------------------------------------------------ routes

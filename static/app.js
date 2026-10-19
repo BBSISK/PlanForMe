@@ -379,7 +379,8 @@
   const lecKey = (l) => `${l.course_code}|${l.date}|${l.start}`;
   const nowHM = () => { const n = new Date(); return `${pad(n.getHours())}:${pad(n.getMinutes())}`; };
   const fmtLecDay = (s) => parseD(s).toLocaleDateString("en-IE", { weekday: "short", day: "numeric", month: "short" });
-  const lecTitle = (l) => `${l.course_code} · ${l.number ? "Lecture " + l.number : "Extra lecture"}`;
+  const lecTitle = (l) => `${l.course_code} · ${l.label || (l.number ? "Lecture " + l.number : "Extra lecture")}`;
+  const lecShort = (l) => l.short || (l.number ? "L" + l.number : "+");
 
   async function renderNotes() {
     const courses = state.courses.filter((c) => c.active !== false);
@@ -393,8 +394,9 @@
     setHeader("Lecture notes", course.name ? `${code} ${course.name}` : "Notes for each lecture, by module");
     const pick = `<div class="course-pick" role="tablist">${courses.map((c) =>
       `<button data-ncourse="${esc(c.code)}" aria-pressed="${c.code === code}" style="--c:${c.colour}">${esc(c.code)}</button>`).join("")}</div>`;
-    const seg = `<div class="seg two"><button data-nmode="lectures" aria-pressed="${mode === "lectures"}">Lectures</button>
-      <button data-nmode="compiled" aria-pressed="${mode === "compiled"}">Semester notes</button></div>`;
+    const seg = `<div class="seg"><button data-nmode="lectures" aria-pressed="${mode === "lectures"}">Lectures</button>
+      <button data-nmode="topics" aria-pressed="${mode === "topics"}">Topics</button>
+      <button data-nmode="compiled" aria-pressed="${mode === "compiled"}">Semester</button></div>`;
     if (!code) { view.innerHTML = `<div class="empty">No modules yet.</div>`; return; }
 
     if (mode === "compiled") {
@@ -408,6 +410,14 @@
     }
     const data = await api("GET", `/api/notes/${encodeURIComponent(code)}`);
     state.lectures = data.lectures;
+    if (mode === "topics") {
+      view.innerHTML = `<section>${pick}</section>${seg}
+        <section><input class="topic-search" id="n-search" type="search" placeholder="Search ${esc(code)} notes…" value="${esc(state.topicQuery || "")}" aria-label="Search notes"></section>
+        <div id="topic-list"></div>`;
+      renderTopicList();
+      $("#n-search").addEventListener("input", (e) => { state.topicQuery = e.target.value; renderTopicList(); });
+      return;
+    }
     const today = iso(new Date()), hmNow = nowHM();
     const held = data.lectures.filter((l) => l.date < today || (l.date === today && l.start <= addMin(hmNow, 60)));
     const upcoming = data.lectures.filter((l) => !held.includes(l)).slice(0, 3);
@@ -417,7 +427,7 @@
       const n = l.note || {};
       const sub = n.topic ? esc(n.topic) : (n.body ? esc(n.body.split("\n")[0].slice(0, 70)) : (future ? "Upcoming" : "No notes yet"));
       return `<li><button class="lec ${l.has_notes ? "has" : ""} ${isNow ? "now" : ""} ${future ? "future" : ""}" data-lec="${esc(lecKey(l))}">
-        <span class="num">${l.number ? "L" + l.number : "+"}</span>
+        <span class="num">${esc(lecShort(l))}</span>
         <span class="t"><strong>${fmtLecDay(l.date)} · ${l.start}${l.end ? "–" + l.end : ""}${l.room ? " · " + esc(l.room) : ""}</strong><span>${sub}</span></span>
         <span class="state">${isNow ? "now" : l.has_notes ? "noted" : future ? "soon" : "empty"}</span></button></li>`;
     };
@@ -426,7 +436,80 @@
         <button class="link" data-nmode="compiled">Semester notes ›</button></h2>
         ${held.length ? `<ul class="lec-list">${held.slice().reverse().map(row).join("")}</ul>` : `<div class="empty">No lectures held yet.</div>`}</section>
       ${upcoming.length ? `<section><h2>Coming up</h2><ul class="lec-list">${upcoming.map(row).join("")}</ul></section>` : ""}
-      <section><button class="btn" id="n-extra">+ Notes for an extra lecture</button></section>`;
+      <section><div class="btn-row"><button class="btn primary" id="n-past">+ Add notes to a past lecture</button>
+        <button class="btn" id="n-extra">+ Extra lecture</button></div></section>`;
+  }
+
+  // Topics: every noted lecture grouped by topic ("Week 4 Lecture 1 - Linked lists" groups under "Linked lists")
+  const topicName = (t) => String(t || "").replace(/^\s*(?:w(?:ee)?k\s*\d+\s*[,·/-]?\s*)?(?:lec(?:ture)?|l)\s*\d+\s*[-–—:·]?\s*/i, "")
+    .replace(/^\s*w(?:ee)?k\s*\d+\s*[-–—:·]\s*/i, "").trim();
+  function topicGroups(list, query) {
+    const q = (query || "").trim().toLowerCase();
+    const noted = list.filter((l) => l.has_notes && (!q || [l.note.topic, l.note.body, l.note.follow_up].join("\n").toLowerCase().includes(q)));
+    const groups = new Map();
+    for (const l of noted) {
+      const name = topicName(l.note.topic) || "No topic";
+      const k = name.toLowerCase();
+      if (!groups.has(k)) groups.set(k, { name, items: [] });
+      groups.get(k).items.push(l);
+    }
+    return [...groups.values()];
+  }
+  function renderTopicList() {
+    const el = $("#topic-list"); if (!el) return;
+    const groups = topicGroups(state.lectures || [], state.topicQuery);
+    state.readerList = groups.flatMap((g) => g.items);
+    if (!groups.length) { el.innerHTML = `<div class="empty">${state.topicQuery ? "No notes match that search." : "No notes yet. Add some from the Lectures list."}</div>`; return; }
+    const q = (state.topicQuery || "").trim().toLowerCase();
+    const snippet = (l) => {
+      const text = [l.note.body, l.note.follow_up].join("\n").replace(/\s+/g, " ").trim();
+      if (!q) return esc(text.slice(0, 110));
+      const i = text.toLowerCase().indexOf(q); if (i < 0) return esc(text.slice(0, 110));
+      const a = Math.max(0, i - 40);
+      return (a ? "…" : "") + esc(text.slice(a, i)) + `<mark>${esc(text.slice(i, i + q.length))}</mark>` + esc(text.slice(i + q.length, i + q.length + 70));
+    };
+    el.innerHTML = groups.map((g) => `<section class="topic-group"><h2>${esc(g.name)} <span class="notes-stat">${g.items.length} entr${g.items.length === 1 ? "y" : "ies"}</span></h2>
+      <ul class="lec-list">${g.items.map((l) => `<li><button class="lec has" data-read="${esc(lecKey(l))}">
+        <span class="num">${esc(lecShort(l))}</span>
+        <span class="t"><strong>${fmtLecDay(l.date)} · ${l.start}${l.note.topic && topicName(l.note.topic) !== l.note.topic ? " · " + esc(l.note.topic) : ""}</strong><span>${snippet(l)}</span></span>
+        <span class="state">read</span></button></li>`).join("")}</ul></section>`).join("");
+  }
+
+  // Read one entry, with ‹ › to step through the entries in the current list
+  function openNoteReader(k) {
+    const list = state.readerList && state.readerList.some((x) => lecKey(x) === k) ? state.readerList : (state.lectures || []).filter((x) => x.has_notes);
+    const i = list.findIndex((x) => lecKey(x) === k); const l = list[i]; if (!l) return;
+    const n = l.note;
+    sheet.innerHTML = `<div class="sheet reader" style="--c:${l.colour}">
+      <div class="reader-nav"><button class="icon-btn" data-rstep="${i - 1}" ${i > 0 ? "" : "disabled"} aria-label="Previous entry">‹</button>
+        <span class="notes-stat">${i + 1} of ${list.length}</span>
+        <button class="icon-btn" data-rstep="${i + 1}" ${i < list.length - 1 ? "" : "disabled"} aria-label="Next entry">›</button></div>
+      <h3>${esc(n.topic || lecTitle(l))}</h3>
+      <div class="sheet-sub">${esc(lecTitle(l))} · ${fmtLong(parseD(l.date))} · ${l.start}${l.end ? "–" + l.end : ""}${l.room ? " · " + esc(l.room) : ""}</div>
+      ${n.body ? `<div class="reader-body">${esc(n.body)}</div>` : ""}
+      ${n.follow_up ? `<div class="reader-follow"><b>Follow up</b><div>${esc(n.follow_up)}</div></div>` : ""}
+      <div class="btn-row"><button class="btn primary" type="button" id="r-edit">Edit</button><button class="btn" type="button" data-close>Close</button></div>
+    </div>`;
+    sheet.hidden = false;
+    sheet.querySelectorAll("[data-rstep]").forEach((b) => { b.onclick = () => openNoteReader(lecKey(list[Number(b.dataset.rstep)])); });
+    $("#r-edit").onclick = () => openLectureSheet(l.course_code, l.date, l.start);
+  }
+
+  // Pick any held lecture (newest first) to back-fill notes
+  function openPastPicker() {
+    const today = iso(new Date());
+    const held = (state.lectures || []).filter((l) => l.date <= today).slice().reverse();
+    if (!held.length) return snack("No lectures held yet for this module.");
+    const firstEmpty = [...held].reverse().find((l) => !l.has_notes) || held[0];  // oldest gap first
+    sheet.innerHTML = `<form class="sheet" id="past-form">
+      <h3>Add notes to a past lecture · ${esc(state.notesCourse)}</h3>
+      <div class="sheet-sub">${held.filter((l) => !l.has_notes).length} of ${held.length} held lectures have no notes yet.</div>
+      <label class="field">Lecture<select id="fp-lec">${held.map((l) => `<option value="${esc(lecKey(l))}" ${l === firstEmpty ? "selected" : ""}>${
+        esc(l.label || lecShort(l))} · ${fmtLecDay(l.date)} ${l.start}${l.has_notes ? " · " + (l.note.topic || "has notes").slice(0, 40) : " · empty"}</option>`).join("")}</select></label>
+      <div class="btn-row"><button class="btn primary" type="submit">Open notes</button><button class="btn" type="button" data-close>Cancel</button></div>
+    </form>`;
+    sheet.hidden = false;
+    $("#past-form").addEventListener("submit", (e) => { e.preventDefault(); const [c, d, st] = $("#fp-lec").value.split("|"); openLectureSheet(c, d, st); });
   }
   const addMin = (h, m) => { const [a, b] = h.split(":").map(Number); const t = Math.max(0, Math.min(1439, a * 60 + b + m)); return `${pad(Math.floor(t / 60))}:${pad(t % 60)}`; };
 
@@ -450,11 +533,17 @@
   }
 
   async function notesClick(e) {
-    const t = e.target.closest("[data-ncourse],[data-nmode],[data-lec],[data-lcode],#n-copy,#n-dl,#n-extra");
+    const t = e.target.closest("[data-ncourse],[data-nmode],[data-lec],[data-read],[data-lcode],#n-copy,#n-dl,#n-extra,#n-past");
     if (!t) return false;
     if (t.dataset.ncourse) { state.notesCourse = t.dataset.ncourse; await render(); return true; }
     if (t.dataset.nmode) { state.notesMode = t.dataset.nmode; await render(); return true; }
-    if (t.dataset.lec) { const [c, d, s] = t.dataset.lec.split("|"); openLectureSheet(c, d, s); return true; }
+    if (t.dataset.lec) {
+      const l = (state.lectures || []).find((x) => lecKey(x) === t.dataset.lec);
+      if (l && l.has_notes && !(l.date === iso(new Date()))) { state.readerList = null; openNoteReader(t.dataset.lec); return true; }
+      const [c, d, s] = t.dataset.lec.split("|"); openLectureSheet(c, d, s); return true;
+    }
+    if (t.dataset.read) { openNoteReader(t.dataset.read); return true; }
+    if (t.id === "n-past") { openPastPicker(); return true; }
     if (t.dataset.lcode) { openLectureSheet(t.dataset.lcode, t.dataset.ldate, t.dataset.lstart); return true; }
     if (t.id === "n-copy") {
       try { await navigator.clipboard.writeText(state.compiled.markdown); snack("Copied the semester notes"); } catch (err) { snack("Couldn't copy here"); }
@@ -528,6 +617,11 @@
       const body = { topic: $("#fl-topic").value, body: $("#fl-body").value, follow_up: $("#fl-follow").value };
       try { localStorage.setItem(draftKey(k), JSON.stringify(body)); } catch (e) { /* ignore */ }
       $("#fl-state").textContent = "Typing…"; clearTimeout(noteTimer); noteTimer = setTimeout(save, 1200);
+    });
+    $("#fl-body").addEventListener("keydown", (e) => {
+      if (e.key !== "Tab" || e.shiftKey) return;
+      e.preventDefault(); const ta = e.target, a = ta.selectionStart;
+      ta.setRangeText("  ", a, ta.selectionEnd, "end"); ta.dispatchEvent(new Event("input", { bubbles: true }));
     });
     $("#lec-form").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -680,7 +774,48 @@
 
   // ---------------------------------------------------------------- chat
   const log = $("#chat-log");
-  function bubble(cls, html) { const d = document.createElement("div"); d.className = `msg ${cls}`; d.innerHTML = html; log.appendChild(d); log.scrollTop = log.scrollHeight; return d; }
+  const dock = $(".dock"), chatBar = $("#chat-bar");
+  const CHAT_H = "planner.chatHeight", CHAT_HIDDEN = "planner.chatHidden";
+  const clampH = (h) => Math.max(70, Math.min(Math.round(innerHeight * 0.7), h));
+  function setChatH(h) { document.documentElement.style.setProperty("--chat-h", `${clampH(h)}px`); }
+  function setChatHidden(on) {
+    dock.classList.toggle("chat-hidden", on);
+    $("#chat-toggle").textContent = on ? "Show chat" : "Hide";
+    $("#chat-toggle").setAttribute("aria-expanded", String(!on));
+    try { localStorage.setItem(CHAT_HIDDEN, on ? "1" : ""); } catch (e) { /* ignore */ }
+  }
+  function updateChatBar() {
+    const n = log.children.length;
+    chatBar.hidden = n === 0;
+    $("#chat-count").textContent = n ? `${Math.ceil(n / 2)} message${n > 2 ? "s" : ""}` : "";
+    $("#suggest").hidden = n > 0;  // suggestions only while the chat is empty
+  }
+  try { const h = Number(localStorage.getItem(CHAT_H)); if (h) setChatH(h); if (localStorage.getItem(CHAT_HIDDEN)) setChatHidden(true); } catch (e) { /* ignore */ }
+  // drag the grip up/down to resize the conversation
+  $("#chat-grip").addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    const y0 = e.clientY, h0 = log.getBoundingClientRect().height || 140;
+    if (dock.classList.contains("chat-hidden")) setChatHidden(false);
+    const move = (ev) => setChatH(h0 + (y0 - ev.clientY));
+    const up = () => {
+      removeEventListener("pointermove", move); removeEventListener("pointerup", up);
+      try { localStorage.setItem(CHAT_H, String(Math.round(log.getBoundingClientRect().height))); } catch (err) { /* ignore */ }
+    };
+    addEventListener("pointermove", move); addEventListener("pointerup", up);
+  });
+  $("#chat-grip").addEventListener("keydown", (e) => {  // keyboard: arrow keys resize
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    e.preventDefault(); setChatH(log.getBoundingClientRect().height + (e.key === "ArrowUp" ? 40 : -40));
+  });
+  $("#chat-toggle").onclick = () => setChatHidden(!dock.classList.contains("chat-hidden"));
+  $("#chat-clear").onclick = () => { log.innerHTML = ""; state.history = []; updateChatBar(); };
+  // the page keeps clear of the dock whatever its height
+  if ("ResizeObserver" in window) new ResizeObserver(() => document.documentElement.style.setProperty("--dock-h", `${dock.offsetHeight}px`)).observe(dock);
+  function bubble(cls, html) {
+    const d = document.createElement("div"); d.className = `msg ${cls}`; d.innerHTML = html; log.appendChild(d);
+    if (cls === "me" && dock.classList.contains("chat-hidden")) setChatHidden(false);
+    updateChatBar(); log.scrollTop = log.scrollHeight; return d;
+  }
   async function send(text) {
     if (!text.trim()) return;
     bubble("me", esc(text));
