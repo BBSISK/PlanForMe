@@ -226,3 +226,29 @@ class Todo(db.Model):
                 "start_date": _iso(start), "priority": self.priority, "position": self.position, "status": self.status,
                 "done_at": _iso(self.done_at), "done_comment": self.done_comment or "",
                 "archived_at": _iso(self.archived_at), "archives_on": archives_on, "created": _iso(self.created)}
+
+
+class LectureNote(db.Model):
+    """Notes for one lecture: a course's timetabled session on a date (keyed by its start time).
+    Ad-hoc lectures (not in the timetable) are allowed too. See notes.py."""
+    __tablename__ = "lecture_notes"
+    __table_args__ = (db.UniqueConstraint("course_id", "date", "start_time", name="uq_lecture_note"),)
+    id = db.Column(db.Integer, primary_key=True)
+    course_id = db.Column(db.Integer, db.ForeignKey("courses.id"), nullable=False)
+    date = db.Column(db.Date, nullable=False)
+    start_time = db.Column(db.Time, nullable=False)
+    end_time = db.Column(db.Time)
+    topic = db.Column(db.String(200), default="")
+    body = db.Column(db.Text, default="")
+    follow_up = db.Column(db.Text, default="")  # questions to ask, things to revise
+    created = db.Column(db.DateTime, default=datetime.now)
+    updated = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    course = db.relationship("Course")
+
+    def to_dict(self):
+        return {"id": self.id, "course_code": self.course.code if self.course else None,
+                "date": _iso(self.date), "start": self.start_time.strftime("%H:%M"),
+                "end": self.end_time.strftime("%H:%M") if self.end_time else None,
+                "topic": self.topic or "", "body": self.body or "", "follow_up": self.follow_up or "",
+                "updated": _iso(self.updated)}

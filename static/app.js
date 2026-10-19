@@ -44,11 +44,13 @@
   async function render() {
     document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.view === state.view)));
     $(".nav-arrows").hidden = !(state.view === "day" || state.view === "week");
+    todaysLectures.stale = true;
     try { localStorage.setItem("planner.view", state.view); } catch (e) { /* ignore */ }
     if (!state.courses.length) state.courses = await api("GET", "/api/courses");
     if (state.view === "day") return renderDay();
     if (state.view === "week") return renderWeek();
     if (state.view === "todo") return renderTodo();
+    if (state.view === "notes") return renderNotes();
     return renderPlan();
   }
 
@@ -101,8 +103,9 @@
     const fx = fixed.map((c) => {
       const s = parseDT(`${key}T${c.start_time}`), e = parseDT(`${key}T${c.end_time}`);
       const h = Math.max(top(e) - top(s), 16);
-      if (c.kind === "class") return `<div class="tl-block class timetabled" style="--c:${c.colour || "var(--accent)"};top:${top(s)}px;height:${h}px">
-        <b>${esc(c.label)}${c.room ? " · " + esc(c.room) : ""}</b>${h > 30 ? `<small>${c.start_time}–${c.end_time}${c.note ? " · " + esc(c.note) : ""}</small>` : ""}</div>`;
+      if (c.kind === "class") return `<button class="tl-block class timetabled" data-lcode="${esc(c.course_code || c.label)}" data-ldate="${key}" data-lstart="${c.start_time}"
+        aria-label="Notes for ${esc(c.label)} at ${c.start_time}" style="--c:${c.colour || "var(--accent)"};top:${top(s)}px;height:${h}px">
+        <b>${esc(c.label)}${c.room ? " · " + esc(c.room) : ""}<span class="pen">✎ notes</span></b>${h > 30 ? `<small>${c.start_time}–${c.end_time}${c.note ? " · " + esc(c.note) : ""}</small>` : ""}</button>`;
       return `<div class="tl-block fixed" style="top:${top(s)}px;height:${h}px"><b>${esc(c.label)}</b></div>`;
     }).join("");
     const bl = items.map((i) => {
@@ -372,6 +375,205 @@
     $("#ft-del").onclick = () => deleteTodo(t.id);
   }
 
+  // ---------------------------------------------------------------- lecture notes
+  const lecKey = (l) => `${l.course_code}|${l.date}|${l.start}`;
+  const nowHM = () => { const n = new Date(); return `${pad(n.getHours())}:${pad(n.getMinutes())}`; };
+  const fmtLecDay = (s) => parseD(s).toLocaleDateString("en-IE", { weekday: "short", day: "numeric", month: "short" });
+  const lecTitle = (l) => `${l.course_code} · ${l.number ? "Lecture " + l.number : "Extra lecture"}`;
+
+  async function renderNotes() {
+    const courses = state.courses.filter((c) => c.active !== false);
+    if (!state.notesCourse || !courses.find((c) => c.code === state.notesCourse)) {
+      try { state.notesCourse = localStorage.getItem("planner.notesCourse"); } catch (e) { /* ignore */ }
+      if (!courses.find((c) => c.code === state.notesCourse)) state.notesCourse = (courses[0] || {}).code;
+    }
+    const code = state.notesCourse, mode = state.notesMode || "lectures";
+    try { localStorage.setItem("planner.notesCourse", code); } catch (e) { /* ignore */ }
+    const course = courses.find((c) => c.code === code) || {};
+    setHeader("Lecture notes", course.name ? `${code} ${course.name}` : "Notes for each lecture, by module");
+    const pick = `<div class="course-pick" role="tablist">${courses.map((c) =>
+      `<button data-ncourse="${esc(c.code)}" aria-pressed="${c.code === code}" style="--c:${c.colour}">${esc(c.code)}</button>`).join("")}</div>`;
+    const seg = `<div class="seg two"><button data-nmode="lectures" aria-pressed="${mode === "lectures"}">Lectures</button>
+      <button data-nmode="compiled" aria-pressed="${mode === "compiled"}">Semester notes</button></div>`;
+    if (!code) { view.innerHTML = `<div class="empty">No modules yet.</div>`; return; }
+
+    if (mode === "compiled") {
+      const data = await api("GET", `/api/notes/${encodeURIComponent(code)}/compiled`);
+      state.compiled = data;
+      view.innerHTML = `<section>${pick}</section>${seg}
+        <section><h2>${data.counts.with_notes} of ${data.counts.held} lectures noted
+          <span class="btn-row"><button class="link" id="n-copy">Copy</button><button class="link" id="n-dl">Download .md</button></span></h2>
+          <article class="compiled">${mdToHtml(data.markdown)}</article></section>`;
+      return;
+    }
+    const data = await api("GET", `/api/notes/${encodeURIComponent(code)}`);
+    state.lectures = data.lectures;
+    const today = iso(new Date()), hmNow = nowHM();
+    const held = data.lectures.filter((l) => l.date < today || (l.date === today && l.start <= addMin(hmNow, 60)));
+    const upcoming = data.lectures.filter((l) => !held.includes(l)).slice(0, 3);
+    const row = (l) => {
+      const isNow = l.date === today && addMin(l.start, -30) <= hmNow && hmNow < (l.end || "23:59");
+      const future = !held.includes(l);
+      const n = l.note || {};
+      const sub = n.topic ? esc(n.topic) : (n.body ? esc(n.body.split("\n")[0].slice(0, 70)) : (future ? "Upcoming" : "No notes yet"));
+      return `<li><button class="lec ${l.has_notes ? "has" : ""} ${isNow ? "now" : ""} ${future ? "future" : ""}" data-lec="${esc(lecKey(l))}">
+        <span class="num">${l.number ? "L" + l.number : "+"}</span>
+        <span class="t"><strong>${fmtLecDay(l.date)} · ${l.start}${l.end ? "–" + l.end : ""}${l.room ? " · " + esc(l.room) : ""}</strong><span>${sub}</span></span>
+        <span class="state">${isNow ? "now" : l.has_notes ? "noted" : future ? "soon" : "empty"}</span></button></li>`;
+    };
+    view.innerHTML = `<section>${pick}</section>${seg}
+      <section><h2>${data.counts.with_notes} of ${data.counts.held} held lectures have notes
+        <button class="link" data-nmode="compiled">Semester notes ›</button></h2>
+        ${held.length ? `<ul class="lec-list">${held.slice().reverse().map(row).join("")}</ul>` : `<div class="empty">No lectures held yet.</div>`}</section>
+      ${upcoming.length ? `<section><h2>Coming up</h2><ul class="lec-list">${upcoming.map(row).join("")}</ul></section>` : ""}
+      <section><button class="btn" id="n-extra">+ Notes for an extra lecture</button></section>`;
+  }
+  const addMin = (h, m) => { const [a, b] = h.split(":").map(Number); const t = Math.max(0, Math.min(1439, a * 60 + b + m)); return `${pad(Math.floor(t / 60))}:${pad(t % 60)}`; };
+
+  // tiny Markdown renderer for the compiled notes (headings, lists, bold; everything escaped first)
+  function mdToHtml(md) {
+    const inline = (t) => esc(t).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+    let html = "", list = null;
+    const close = () => { if (list) { html += `</${list}>`; list = null; } };
+    let para = [];
+    const flush = () => { if (para.length) { html += `<p>${para.map(inline).join("\n")}</p>`; para = []; } };
+    for (const line of md.split("\n")) {
+      let m;
+      if ((m = line.match(/^(#{1,2}) (.*)/))) { flush(); close(); html += `<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`; }
+      else if ((m = line.match(/^- (.*)/))) { flush(); if (list !== "ul") { close(); html += "<ul>"; list = "ul"; } html += `<li>${inline(m[1])}</li>`; }
+      else if ((m = line.match(/^\d+\. (.*)/))) { flush(); if (list !== "ol") { close(); html += "<ol>"; list = "ol"; } html += `<li>${inline(m[1])}</li>`; }
+      else if (!line.trim()) { flush(); close(); }
+      else { close(); para.push(line); }
+    }
+    flush(); close();
+    return html;
+  }
+
+  async function notesClick(e) {
+    const t = e.target.closest("[data-ncourse],[data-nmode],[data-lec],[data-lcode],#n-copy,#n-dl,#n-extra");
+    if (!t) return false;
+    if (t.dataset.ncourse) { state.notesCourse = t.dataset.ncourse; await render(); return true; }
+    if (t.dataset.nmode) { state.notesMode = t.dataset.nmode; await render(); return true; }
+    if (t.dataset.lec) { const [c, d, s] = t.dataset.lec.split("|"); openLectureSheet(c, d, s); return true; }
+    if (t.dataset.lcode) { openLectureSheet(t.dataset.lcode, t.dataset.ldate, t.dataset.lstart); return true; }
+    if (t.id === "n-copy") {
+      try { await navigator.clipboard.writeText(state.compiled.markdown); snack("Copied the semester notes"); } catch (err) { snack("Couldn't copy here"); }
+      return true;
+    }
+    if (t.id === "n-dl") {
+      const url = URL.createObjectURL(new Blob([state.compiled.markdown], { type: "text/markdown" }));
+      const a = document.createElement("a"); a.href = url; a.download = `${state.compiled.course.code}-notes.md`;
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+      return true;
+    }
+    if (t.id === "n-extra") { openExtraLectureSheet(); return true; }
+    return false;
+  }
+
+  function openExtraLectureSheet() {
+    const code = state.notesCourse;
+    sheet.innerHTML = `<form class="sheet" id="extra-form">
+      <h3>Extra lecture · ${esc(code)}</h3>
+      <div class="sheet-sub">For a make-up or rescheduled lecture that isn't on the timetable.</div>
+      <div class="grid2"><label class="field">Date<input type="date" id="fx-date" value="${iso(new Date())}" required></label>
+        <label class="field">Start<input type="time" id="fx-start" value="${nowHM().slice(0, 3)}00" required></label></div>
+      <div class="btn-row"><button class="btn primary" type="submit">Open notes</button><button class="btn" type="button" data-close>Cancel</button></div>
+      <div id="fx-err"></div></form>`;
+    sheet.hidden = false;
+    $("#extra-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      try {
+        await api("PUT", `/api/notes/${encodeURIComponent(code)}/lecture`, { date: $("#fx-date").value, start: $("#fx-start").value });
+        openLectureSheet(code, $("#fx-date").value, $("#fx-start").value);
+      } catch (err) { $("#fx-err").innerHTML = `<div class="confirm">${esc(err.message)}</div>`; }
+    });
+  }
+
+  // Notes sheet for one lecture. Autosaves as you type; keeps a local draft until the server has it.
+  let noteTimer = null;
+  const draftKey = (k) => `planner.notedraft.${k}`;
+  async function openLectureSheet(code, day, start, auto = false) {
+    let l;
+    try { l = await api("GET", `/api/notes/${encodeURIComponent(code)}/lecture?date=${day}${start ? "&start=" + start : ""}`); }
+    catch (err) { return snack(err.message); }
+    const k = lecKey(l), n = l.note || { topic: "", body: "", follow_up: "" };
+    let draft = null;
+    try { draft = JSON.parse(localStorage.getItem(draftKey(k)) || "null"); } catch (e) { /* ignore */ }
+    const v = draft || n;
+    const prev = (state.lectures || []).filter((x) => x.course_code === l.course_code && x.has_notes && (x.date + x.start) < (l.date + l.start)).pop();
+    sheet.innerHTML = `<form class="sheet" id="lec-form" style="--c:${l.colour}">
+      <h3>${esc(lecTitle(l))}${auto ? ` <span class="chip" style="--c:${l.colour}">starting soon</span>` : ""}</h3>
+      <div class="sheet-sub">${esc(l.course_name)} · ${fmtLong(parseD(l.date))} · ${l.start}${l.end ? "–" + l.end : ""}${l.room ? " · " + esc(l.room) : ""}</div>
+      ${prev && prev.note.topic ? `<div class="sheet-sub">Last time: ${esc(prev.note.topic)}</div>` : ""}
+      <label class="field">Topic<input id="fl-topic" maxlength="200" placeholder="What's this lecture about?" value="${esc(v.topic)}"></label>
+      <label class="field">Notes<textarea id="fl-body" class="notes-body" placeholder="Key points, definitions, examples…">${esc(v.body)}</textarea></label>
+      <label class="field">Follow up<textarea id="fl-follow" rows="2" placeholder="Questions to ask, things to revise">${esc(v.follow_up)}</textarea></label>
+      <div class="btn-row" style="align-items:center"><button class="btn primary" type="submit">Done</button>
+        <span class="save-state" id="fl-state">${draft ? "Unsaved draft restored" : n.updated ? "Saved" : ""}</span></div>
+    </form>`;
+    sheet.hidden = false;
+    state.openLecture = k;
+    if (!auto) $("#fl-body").focus();
+    const save = async () => {
+      clearTimeout(noteTimer);
+      const body = { date: l.date, start: l.start, topic: $("#fl-topic").value, body: $("#fl-body").value, follow_up: $("#fl-follow").value };
+      const st = $("#fl-state"); if (!st) return true;
+      try {
+        await api("PUT", `/api/notes/${encodeURIComponent(l.course_code)}/lecture`, body);
+        try { localStorage.removeItem(draftKey(k)); } catch (e) { /* ignore */ }
+        st.textContent = `Saved ${nowHM()}`; st.classList.remove("err"); return true;
+      } catch (err) { st.textContent = "Not saved (offline?) · kept on this device"; st.classList.add("err"); return false; }
+    };
+    $("#lec-form").addEventListener("input", () => {
+      const body = { topic: $("#fl-topic").value, body: $("#fl-body").value, follow_up: $("#fl-follow").value };
+      try { localStorage.setItem(draftKey(k), JSON.stringify(body)); } catch (e) { /* ignore */ }
+      $("#fl-state").textContent = "Typing…"; clearTimeout(noteTimer); noteTimer = setTimeout(save, 1200);
+    });
+    $("#lec-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (await save()) { closeSheet(); if (state.view === "notes") render(); }
+    });
+    if (draft) save();
+  }
+
+  // Open the notes sheet by itself LEAD minutes before each lecture (while the app is open or comes back).
+  const AUTO_KEY = "planner.autoopened";
+  let todaysLectures = { date: null, lectures: [], lead_minutes: 5 };
+  async function lectureWatch() {
+    if (DEMO && !window.PLANNER_SEED) return;
+    const today = iso(new Date());
+    try {
+      if (todaysLectures.date !== today || todaysLectures.stale) todaysLectures = await api("GET", "/api/notes/today");
+    } catch (e) { return; }
+    const hmNow = nowHM();
+    let opened = {};
+    try { opened = JSON.parse(localStorage.getItem(AUTO_KEY) || "{}"); } catch (e) { /* ignore */ }
+    for (const k of Object.keys(opened)) if (!k.includes(`|${today}|`)) delete opened[k];
+    const due = todaysLectures.lectures.find((l) => addMin(l.start, -todaysLectures.lead_minutes) <= hmNow && hmNow < (l.end || addMin(l.start, 60)) && !opened[lecKey(l)]);
+    if (!due || !sheet.hidden || document.visibilityState !== "visible") return;
+    opened[lecKey(due)] = true;
+    try { localStorage.setItem(AUTO_KEY, JSON.stringify(opened)); } catch (e) { /* ignore */ }
+    openLectureSheet(due.course_code, due.date, due.start, true);
+  }
+  setInterval(lectureWatch, 20000);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") { todaysLectures.stale = true; lectureWatch(); } });
+
+  // Deep links (from the calendar reminder): /?notes=CS210 opens that module's current or latest lecture;
+  // /?notes=CS210&date=2026-10-19&start=09:00 opens one lecture exactly.
+  async function openFromLink() {
+    const q = new URLSearchParams(location.search);
+    const code = q.get("notes"); if (!code) return;
+    history.replaceState(null, "", location.pathname);
+    state.view = "notes"; state.notesCourse = code.toUpperCase(); state.notesMode = "lectures";
+    await render();
+    if (q.get("date")) return openLectureSheet(state.notesCourse, q.get("date"), q.get("start"));
+    const today = iso(new Date()), hmNow = nowHM(), list = state.lectures || [];
+    const pick = list.find((l) => l.date === today && addMin(l.start, -60) <= hmNow && hmNow < addMin(l.end || l.start, 60))
+      || list.filter((l) => l.date < today || (l.date === today && l.start <= hmNow)).pop()
+      || list.find((l) => l.date >= today);
+    if (pick) openLectureSheet(pick.course_code, pick.date, pick.start, pick.date === today);
+  }
+
   // snackbar: short message with optional actions (Undo, Add comment)
   let snackTimer = null;
   function snack(text, actions = [], ms = 7000) {
@@ -446,6 +648,7 @@
 
   view.addEventListener("click", async (e) => {
     if (await todoClick(e)) return;
+    if (await notesClick(e)) return;
     const t = e.target.closest("[data-toggle],[data-edit],[data-target],[data-ms],#plan-week,#apply-plan,#discard-plan");
     if (!t) return;
     if (t.dataset.toggle) {
@@ -715,12 +918,57 @@
       }
     }
 
+    // lecture notes (demo): sessions from the timetable, merged when back to back, numbered from term start
+    const lnotes = {};
+    const nCourse = (code) => courses.find((c) => c.code.toLowerCase() === String(code).toLowerCase());
+    function sessionsOn(key, code) {
+      const out = [];
+      for (const c of courses) {
+        if (code && c.code !== code) continue;
+        const bl = constraints.filter((x) => x.kind === "class" && x.course_code === c.code && activeOn(x, key)).sort((a, b) => a.start_time.localeCompare(b.start_time));
+        for (const x of bl) {
+          const last = out[out.length - 1];
+          if (last && last.course_code === c.code && last.end === x.start_time) last.end = x.end_time;
+          else out.push({ course_code: c.code, course_name: c.name, colour: c.colour, date: key, start: x.start_time, end: x.end_time, room: x.room || "", in_timetable: true });
+        }
+      }
+      return out;
+    }
+    function allSessions(code) {
+      const out = []; let d = parseD(TERM.start || iso(addDays(today, -28))); const end = parseD(TERM.end || iso(addDays(today, 60)));
+      while (d <= end) { out.push(...sessionsOn(iso(d), code)); d = addDays(d, 1); }
+      out.forEach((s, n) => { s.number = n + 1; });
+      return out;
+    }
+    const withNote = (s) => { const n = lnotes[`${s.course_code}|${s.date}|${s.start}`] || null;
+      return { ...s, note: n, has_notes: !!(n && (n.topic + n.body + n.follow_up).trim()) }; };
+    function demoNotes(method, p, q, b) {
+      if (p === "/api/notes/today") { const key = q.get("date") || iso(new Date());
+        return { date: key, lead_minutes: 5, lectures: sessionsOn(key).map((s) => withNote({ ...s, number: (allSessions(s.course_code).find((x) => x.date === key && x.start === s.start) || {}).number })) }; }
+      const m = p.match(/^\/api\/notes\/([^/]+)(\/lecture|\/compiled)?$/); const c = m && nCourse(decodeURIComponent(m[1]));
+      if (!c) throw new Error("Unknown course");
+      const list = allSessions(c.code).map(withNote);
+      const find = (d, st) => list.find((x) => x.date === d && (!st || x.start === st || (x.start <= st && st < x.end)))
+        || { course_code: c.code, course_name: c.name, colour: c.colour, date: d, start: st, end: null, room: "", number: null, in_timetable: false, note: null, has_notes: false };
+      const counts = { total: list.length, held: list.filter((x) => x.date <= iso(new Date())).length, with_notes: list.filter((x) => x.has_notes).length };
+      if (!m[2]) return { course: c, lectures: list, counts };
+      if (m[2] === "/lecture" && method === "GET") return find(q.get("date"), q.get("start"));
+      if (m[2] === "/lecture") { const s = find(b.date, b.start); const k = `${c.code}|${s.date}|${s.start}`;
+        const n = lnotes[k] || { topic: "", body: "", follow_up: "" };
+        ["topic", "body", "follow_up"].forEach((f) => { if (b[f] != null) n[f] = b[f]; }); n.updated = nowIso(); lnotes[k] = n; return withNote(s); }
+      const done = list.filter((x) => x.has_notes);
+      const md = [`# ${c.code} ${c.name}: semester notes`, "", `${done.length} of ${counts.held} lectures so far have notes.`,
+        ...done.flatMap((x) => ["", `## Lecture ${x.number} · ${x.date} ${x.start}${x.note.topic ? ": " + x.note.topic : ""}`, "", x.note.body])].join("\n");
+      return { course: c, markdown: md, counts };
+    }
+
     function handle(method, path, body) {
       const [p] = path.split("?"); const q = new URLSearchParams(path.split("?")[1] || "");
       let m;
       const ok = (x) => Promise.resolve(JSON.parse(JSON.stringify(x)));
       try {
         if (p.startsWith("/api/todos")) return ok(demoTodos(method, p, q, body));
+        if (p.startsWith("/api/notes")) return ok(demoNotes(method, p, q, body));
         if (method === "GET" && p === "/api/courses") return ok(courses);
         if (method === "GET" && p === "/api/constraints") return ok(constraints);
         if (method === "GET" && p === "/api/items") return ok(listItems(q.get("from"), q.get("to")));
@@ -761,5 +1009,6 @@
     return { handle };
   })();
 
-  render().catch((e) => { view.innerHTML = `<div class="confirm">Couldn't load: ${esc(e.message)}</div>`; });
+  const boot = new URLSearchParams(location.search).get("notes") ? openFromLink() : render();
+  Promise.resolve(boot).then(lectureWatch).catch((e) => { view.innerHTML = `<div class="confirm">Couldn't load: ${esc(e.message)}</div>`; });
 })();

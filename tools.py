@@ -234,6 +234,11 @@ TOOLS += _todos.TOOLS
 REGISTRY.update(_todos.FUNCS)
 WRITES |= _todos.WRITES
 
+import notes as _notes  # noqa: E402  (lecture notes)
+TOOLS += _notes.TOOLS
+REGISTRY.update(_notes.FUNCS)
+WRITES |= _notes.WRITES
+
 
 def execute(name, args):
     """Run a tool. Returns (result_dict, is_error)."""
@@ -242,7 +247,7 @@ def execute(name, args):
         return {"error": f"unknown tool {name}"}, True
     try:
         return fn(**args), False
-    except (ToolError, ValueError, TypeError, _todos.TodoError) as e:
+    except (ToolError, ValueError, TypeError, _todos.TodoError, _notes.NoteError) as e:
         db.session.rollback()
         return {"error": str(e)}, True
 

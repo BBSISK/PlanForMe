@@ -40,6 +40,7 @@ the MCP server both call `tools.execute(name, args)`, so behaviour is identical 
 | `milestones` | Steps toward a goal | `goal_id`, `title`, `due`, `done` |
 | `constraints` | Recurring fixed time (teaching, commute, sleep, gym) | `label`, `weekdays` ("0,1,2,3,4"), `start_time`, `end_time`, `kind` (busy · preferred_study) |
 | `chat_log` | Audit of what Claude changed | `role`, `content`, `tool_calls` JSON, `created` |
+| `lecture_notes` | Notes for one lecture | `course_id`, `date`, `start_time` (unique together), `end_time`, `topic`, `body`, `follow_up` |
 
 Times are stored as **naive local time (Europe/Dublin)** — single user, single timezone, and it
 keeps the UI and Claude prompts simple. Revisit if Google Calendar sync lands (store UTC + tz then).
@@ -102,6 +103,24 @@ Later: weighting by energy (mornings for hard modules), spaced repetition for re
 - Single user: `APP_PASSWORD` login → signed session cookie (30 days).
 - `API_TOKEN` bearer for MCP / scripts. `ANTHROPIC_API_KEY` only server-side.
 - Chat changes are logged to `chat_log` with the tool calls, so anything Claude did is traceable.
+
+## 8a. Lecture notes (notes.py)
+
+- A **lecture** = one course's timetabled `class` session on a date. Back-to-back slots for the same course merge
+  into one lecture; days off (bank holidays, study weeks, exams) are skipped; lectures are numbered from term start.
+- Notes are keyed on (course, date, start time), so nothing is created until something is typed. Extra lectures
+  not on the timetable are allowed (pass a start time).
+- **Notes tab**: pick a module → its lectures (newest first, current one highlighted) → tap to open the notes sheet
+  (topic, notes, follow up; autosaves 1.2 s after typing, keeps a local draft if offline).
+  **Semester notes** compiles every lecture into one Markdown doc (follow-ups, topics covered, each lecture, gaps)
+  with Copy / Download .md. Tapping a class on the Today timeline also opens its notes.
+- **Auto-open**: while the app is open (or when it comes back to the foreground) the notes sheet opens by itself
+  5 min before each lecture, once per lecture (`/api/notes/today`, checked every 20 s).
+- **Deep link** `/?notes=CS210` opens that module's current or latest lecture; `&date=YYYY-MM-DD&start=HH:MM`
+  opens one exactly. Each lecture slot in Google Calendar carries this link with a 5-min popup reminder.
+- API: `GET /api/notes/today`, `GET /api/notes/<code>`, `GET|PUT /api/notes/<code>/lecture`,
+  `GET /api/notes/<code>/compiled(.md)`, `DELETE /api/notes/id/<id>`.
+- Claude tools: `get_lecture_notes`, `save_lecture_note` (supports `append`), `compile_course_notes`.
 
 ## 9. Roadmap
 

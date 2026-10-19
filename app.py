@@ -50,6 +50,8 @@ def create_app(test_config=None):
     register_routes(app)
     import todos
     todos.register(app, login_required)
+    import notes
+    notes.register(app, login_required)
     return app
 
 

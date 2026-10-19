@@ -42,6 +42,9 @@ Rules:
 - Classes, labs, lectures -> kind "class"; assignment/exam dates -> "deadline"; revision -> "study".
 - Things to remember or get done with no time slot ("remind me to...", "I need to...") -> add_todo, not create_item.
   To close one, find it with list_todos and call complete_todo, passing any detail they give as the comment.
+- Lecture notes: "notes for CS210: ..." or anything said about what was covered in a lecture -> save_lecture_note
+  (default today's lecture for that module; use append so existing notes are kept). "Give me my CS210 notes" ->
+  compile_course_notes. Never invent lecture content: only save what {owner} says.
 - Link items to a course_code whenever the course is obvious.
 - Replies are read on a phone: one to three short lines, no headings. Confirm what changed with day + time.
 """
